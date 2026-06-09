@@ -37,8 +37,8 @@
     "sql.js": "1.10.3"
   },
   "devDependencies": {
-    "@types/node": "18.19.112",
-    "tsx": "4.20.3",
-    "typescript": "5.8.3"
+    "@types/node": "25.9.2",
+    "tsx": "4.22.4",
+    "typescript": "6.0.3"
   }
 }
