@@ -1,4 +1,4 @@
-import { test } from "bun:test"
+import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import { createAiTextGenerationClient, CodexProviderSetupRequiredError, type CodexAuthProvider } from "../../../src/ai/provider"

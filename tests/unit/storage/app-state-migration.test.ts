@@ -1,4 +1,4 @@
-import { spyOn, test } from "bun:test"
+import { mock, test } from "node:test"
 import assert from "node:assert/strict"
 import fs from "node:fs"
 import os from "node:os"
@@ -159,7 +159,8 @@ test("migrateLegacyAppStateToData does not overwrite a destination created durin
     await writeFile(sourcePath, "{\"title\":\"State\"}", "utf8")
 
     const originalCopyFileSync = fs.copyFileSync
-    const copyMock = spyOn(fs, "copyFileSync").mockImplementation((source, destination, mode) => {
+    const copyMock = mock.method(fs, "copyFileSync", (...args: Parameters<typeof fs.copyFileSync>) => {
+      const [source, destination, mode] = args
       if (String(destination) === destinationPath) {
         fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
         fs.writeFileSync(destinationPath, "{\"title\":\"Data\"}", "utf8")
@@ -181,7 +182,7 @@ test("migrateLegacyAppStateToData does not overwrite a destination created durin
         },
       )
     } finally {
-      copyMock.mockRestore()
+      copyMock.mock.restore()
     }
 
     assert.equal(await readFile(destinationPath, "utf8"), "{\"title\":\"Data\"}")

@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible problem in the headless BlueNote core package.
+title: "bug: "
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Core API
+        - Storage/indexing
+        - AI provider support
+        - Package/exports
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include minimal code or commands when possible. Do not include private note content or secrets.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Fill in versions relevant to the consuming project.
+      value: |
+        - OS:
+        - Node.js version:
+        - npm version:
+        - @lordierclaw/bluenote-core version:
+        - Consuming project/tooling:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or errors
+      description: Paste relevant output with secrets removed.
+      render: shell

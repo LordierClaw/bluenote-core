@@ -1,4 +1,4 @@
-import { describe, test } from "bun:test"
+import { describe, test } from "node:test"
 import assert from "node:assert/strict"
 import { existsSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"

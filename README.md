@@ -1,6 +1,6 @@
 # @lordierclaw/bluenote-core
 
-Headless BlueNote core for local-first Markdown notes. This package contains the storage, note business logic, search/indexing, configuration, domain helpers, and AI support code used by BlueNote.
+Headless BlueNote core for local-first Markdown notes. This package contains storage, note business logic, search/indexing, configuration, domain helpers, and AI support code used by BlueNote.
 
 It intentionally does **not** include terminal UI, OpenTUI rendering, CLI entrypoints, editor integration, clipboard integration, server, sync, or other terminal-client behavior.
 
@@ -22,6 +22,7 @@ Until the package is published to npm, consume a local checkout after building i
 
 ```sh
 cd ../bluenote-core
+npm install
 npm run build
 ```
 
@@ -39,21 +40,23 @@ Do not import `src/*`, `dist/*`, or other private paths. The package exports onl
 
 ## Requirements
 
-- Runtime: Node.js 18 or newer
-- Development/test runner: Bun
+- Node.js 18 or newer
+- npm
 
 ## Commands
 
 ```sh
-bun install
+npm install
 npm run typecheck
 npm run build
-npm run test
+npm test
 npm run check
 ```
 
-`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. Tests currently use Bun as the development test runner. The generated `dist/` directory is included in npm packages but is not tracked in git.
+`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. `npm test` runs the TypeScript test suite with Node's test runner. `npm run check` runs typecheck, build, package import smoke check, and tests. The generated `dist/` directory is included in npm packages but is not tracked in git.
 
 ## Scope and compatibility
 
 This repository preserves the existing public API, storage layout, note file format, search semantics, and AI behavior from the extracted BlueNote core package. It is a standalone library repository, not a redesign of BlueNote and not a UI/client package.
+
+For contribution guidance, see [CONTRIBUTING.md](./CONTRIBUTING.md).

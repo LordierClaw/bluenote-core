@@ -1,8 +1,8 @@
-import { test } from "bun:test"
+import { test } from "node:test"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
-import { access, mkdir, mkdtemp, rm } from "node:fs/promises"
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 
 import { archiveNote } from "../../../src/core/archive-note"
 import { sidecarJson } from "../../helpers/note-fixtures"
@@ -11,13 +11,13 @@ import { createNoteRepository } from "../../../src/storage/note-repository"
 async function writeNote(rootPath: string, relativePath: string, markdown: string) {
   const notePath = path.join(rootPath, relativePath)
   await mkdir(path.dirname(notePath), { recursive: true })
-  await Bun.write(notePath, markdown)
+  await writeFile(notePath, markdown, "utf8")
 }
 
 async function writeSidecar(rootPath: string, key: string, json: string) {
   const sidecarPath = path.join(rootPath, ".data", "notes", `${key}.json`)
   await mkdir(path.dirname(sidecarPath), { recursive: true })
-  await Bun.write(sidecarPath, json)
+  await writeFile(sidecarPath, json, "utf8")
 }
 
 test("archiveNote moves a selected note into .data/archive and stamps archivedAt", async () => {
@@ -273,7 +273,7 @@ test("archiveNote fails when .data/archive already contains the same key", async
       /Found duplicate note key 'duplicate-source' for '\.data[\\/]archive[\\/]duplicate-source\.md' and 'note[\\/]duplicate-source\.md'\./,
     )
 
-    const archivedExisting = await Bun.file(path.join(rootPath, ".data", "archive", "duplicate-source.md")).text()
+    const archivedExisting = await readFile(path.join(rootPath, ".data", "archive", "duplicate-source.md"), "utf8")
     assert.equal(archivedExisting, "Archived first.\n")
 
     const original = createNoteRepository(rootPath).read(path.join(rootPath, "note", "duplicate-source.md"))

@@ -1,13 +1,14 @@
-import { test } from "bun:test"
+import { test } from "node:test"
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { InvalidFrontmatterError } from "../../../src/core/errors"
 import { parseNoteFile, serializeNoteFile } from "../../../src/storage/frontmatter"
 import type { ParsedNote } from "../../../src/storage/note-schema"
 
-const fixturesDir = path.resolve(import.meta.dir, "../../fixtures/invalid-frontmatter")
+const fixturesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../fixtures/invalid-frontmatter")
 
 test("parseNoteFile parses a valid Markdown note with YAML frontmatter", () => {
   const markdown = `---

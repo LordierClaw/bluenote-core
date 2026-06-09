@@ -1,3 +1,5 @@
+import { webcrypto } from "node:crypto"
+
 export interface ShortNoteSuffixOptions {
   suffixLength?: number
   randomSource?: () => number
@@ -20,7 +22,7 @@ const DEFAULT_MAX_ATTEMPTS = 10
 const UNTITLED_SLUG = "untitled"
 
 function defaultRandomSource(): number {
-  return crypto.getRandomValues(new Uint32Array(1))[0] ?? 0
+  return webcrypto.getRandomValues(new Uint32Array(1))[0] ?? 0
 }
 
 export function slugifyNoteTitle(title: string): string {

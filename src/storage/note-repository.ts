@@ -1,5 +1,5 @@
 import path from "node:path"
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import fs from "node:fs"
 
 import { UsageError } from "../core/errors"
 import { createNoteDescription } from "../domain/note-description"
@@ -123,7 +123,7 @@ function wrapRepositoryError(action: "create" | "read" | "list" | "archive" | "d
 }
 
 function collectMarkdownFiles(rootPath: string, currentPath: string, files: string[]): void {
-  for (const entry of readdirSync(currentPath, { withFileTypes: true })) {
+  for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
     const entryPath = path.join(currentPath, entry.name)
 
     if (entry.isDirectory()) {
@@ -158,12 +158,12 @@ function relativePathHasHiddenSegment(relativePath: string): boolean {
 }
 
 function destinationFolderIsUsableNormalFolder(normalNotesPath: string, candidateFolderPath: string): boolean {
-  if (!existsSync(candidateFolderPath) || !statSync(candidateFolderPath).isDirectory()) {
+  if (!fs.existsSync(candidateFolderPath) || !fs.statSync(candidateFolderPath).isDirectory()) {
     return false
   }
 
   try {
-    assertPathInsideRoot(realpathSync(normalNotesPath), realpathSync(candidateFolderPath))
+    assertPathInsideRoot(fs.realpathSync(normalNotesPath), fs.realpathSync(candidateFolderPath))
     return true
   } catch {
     return false
@@ -220,7 +220,7 @@ function noteKeyExists(rootPath: string, key: string): boolean {
   const notePaths: string[] = []
 
   for (const notesPath of [getNormalNotesPath(rootPath), getDraftNotesPath(rootPath)]) {
-    if (!existsSync(notesPath)) {
+    if (!fs.existsSync(notesPath)) {
       continue
     }
 
@@ -322,11 +322,11 @@ function assertNormalFolderRelativePath(rootPath: string, folderRelativePath: st
 
 function listSidecarKeys(rootPath: string): string[] {
   const stateNotesPath = getStateNotesPath(rootPath)
-  if (!existsSync(stateNotesPath)) {
+  if (!fs.existsSync(stateNotesPath)) {
     return []
   }
 
-  return readdirSync(stateNotesPath)
+  return fs.readdirSync(stateNotesPath)
     .filter((entry) => entry.endsWith(".json"))
     .map((entry) => path.basename(entry, ".json"))
 }
@@ -347,7 +347,7 @@ function assertCustomNormalFolderRename(rootPath: string, folderRelativePath: st
   const previousPath = assertPathInsideRoot(rootPath, path.join(rootPath, previousRelativePath))
   const nextPath = assertPathInsideRoot(rootPath, path.join(rootPath, nextRelativePath))
 
-  if (!destinationFolderIsUsableNormalFolder(getNormalNotesPath(rootPath), previousPath) || existsSync(nextPath)) {
+  if (!destinationFolderIsUsableNormalFolder(getNormalNotesPath(rootPath), previousPath) || fs.existsSync(nextPath)) {
     throw new UsageError(`Could not rename folder '${previousRelativePath}'.`, {
       hint: "Choose an existing custom note folder and a free destination name.",
     })
@@ -376,7 +376,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       )
       const sidecarPath = sidecars.getSidecarPath(canonicalFrontmatter.id)
 
-      if (existsSync(notePath) || existsSync(sidecarPath) || noteKeyExists(normalizedRootPath, canonicalFrontmatter.id)) {
+      if (fs.existsSync(notePath) || fs.existsSync(sidecarPath) || noteKeyExists(normalizedRootPath, canonicalFrontmatter.id)) {
         throw new UsageError(`Could not create note '${relativePath}'.`, {
           hint: "A note with the same basename/key already exists somewhere under note/, draft/, or in sidecar metadata. Use a different id or remove/archive the existing note first.",
         })
@@ -390,16 +390,16 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       let wroteNoteFile = false
 
       try {
-        mkdirSync(path.dirname(notePath), { recursive: true })
-        writeFileSync(notePath, markdown, { encoding: "utf8", flag: "wx" })
+        fs.mkdirSync(path.dirname(notePath), { recursive: true })
+        fs.writeFileSync(notePath, markdown, { encoding: "utf8", flag: "wx" })
         wroteNoteFile = true
         sidecars.write(sidecar)
       } catch (error) {
         const rollbackErrors: unknown[] = []
 
-        if (wroteNoteFile && existsSync(notePath)) {
+        if (wroteNoteFile && fs.existsSync(notePath)) {
           try {
-            rmSync(notePath, { force: true })
+            fs.rmSync(notePath, { force: true })
           } catch (rollbackError) {
             rollbackErrors.push(rollbackError)
           }
@@ -429,7 +429,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       let markdown: string
 
       try {
-        markdown = readFileSync(normalizedNotePath, "utf8")
+        markdown = fs.readFileSync(normalizedNotePath, "utf8")
       } catch (error) {
         wrapRepositoryError("read", relativePath, error)
       }
@@ -439,7 +439,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       try {
         const plainNote = parsePlainNote(markdown, relativePath)
 
-        if (!existsSync(sidecarPath)) {
+        if (!fs.existsSync(sidecarPath)) {
           return parseNoteFile(markdown, relativePath)
         }
 
@@ -469,7 +469,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       const relativePath = toRootRelativePath(normalizedRootPath, normalizedNotePath)
 
       try {
-        return readFileSync(normalizedNotePath, "utf8")
+        return fs.readFileSync(normalizedNotePath, "utf8")
       } catch (error) {
         wrapRepositoryError("read", relativePath, error)
       }
@@ -480,7 +480,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       const relativePath = toRootRelativePath(normalizedRootPath, normalizedNotePath)
       const existing = this.read(normalizedNotePath)
       const existingSidecarPath = sidecars.getSidecarPath(existing.frontmatter.id)
-      const existingSidecar = existsSync(existingSidecarPath) ? sidecars.read(existing.frontmatter.id) : buildExistingSidecar(existing)
+      const existingSidecar = fs.existsSync(existingSidecarPath) ? sidecars.read(existing.frontmatter.id) : buildExistingSidecar(existing)
       const previousMarkdown = createPlainNoteMarkdown(relativePath, existing.body)
       const updatedMarkdown = createPlainNoteMarkdown(relativePath, input.body)
       const updatedSidecar: NoteSidecar = {
@@ -531,11 +531,11 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       const nextNotePath = notePathFromRelativePath(normalizedRootPath, nextRelativePath)
       const previousSidecarPath = sidecars.getSidecarPath(previousKey)
       const nextSidecarPath = sidecars.getSidecarPath(input.nextKey)
-      const existingSidecar = existsSync(previousSidecarPath) ? sidecars.read(previousKey) : buildExistingSidecar(existing)
+      const existingSidecar = fs.existsSync(previousSidecarPath) ? sidecars.read(previousKey) : buildExistingSidecar(existing)
 
       if (
         input.nextKey !== previousKey &&
-        (existsSync(nextNotePath) || existsSync(nextSidecarPath) || noteKeyExists(normalizedRootPath, input.nextKey))
+        (fs.existsSync(nextNotePath) || fs.existsSync(nextSidecarPath) || noteKeyExists(normalizedRootPath, input.nextKey))
       ) {
         throw new UsageError(`Could not rename note '${previousRelativePath}'.`, {
           hint: `The generated key '${input.nextKey}' already exists. Change the title and retry, or remove the conflicting note first.`,
@@ -557,8 +557,8 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       let removedPreviousSidecar = false
 
       try {
-        mkdirSync(path.dirname(nextNotePath), { recursive: true })
-        writeFileSync(nextNotePath, createPlainNoteMarkdown(nextRelativePath, input.body), {
+        fs.mkdirSync(path.dirname(nextNotePath), { recursive: true })
+        fs.writeFileSync(nextNotePath, createPlainNoteMarkdown(nextRelativePath, input.body), {
           encoding: "utf8",
           flag: nextNotePath === normalizedNotePath ? "w" : "wx",
         })
@@ -568,12 +568,12 @@ export function createNoteRepository(rootPath: string): NoteRepository {
         wroteNextSidecar = true
 
         if (nextNotePath !== normalizedNotePath) {
-          rmSync(normalizedNotePath)
+          fs.rmSync(normalizedNotePath)
           removedPreviousNote = true
         }
 
-        if (nextSidecarPath !== previousSidecarPath && existsSync(previousSidecarPath)) {
-          rmSync(previousSidecarPath)
+        if (nextSidecarPath !== previousSidecarPath && fs.existsSync(previousSidecarPath)) {
+          fs.rmSync(previousSidecarPath)
           removedPreviousSidecar = true
         }
       } catch (error) {
@@ -581,7 +581,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
 
         if (removedPreviousNote) {
           try {
-            writeFileSync(normalizedNotePath, createPlainNoteMarkdown(previousRelativePath, existing.body), "utf8")
+            fs.writeFileSync(normalizedNotePath, createPlainNoteMarkdown(previousRelativePath, existing.body), "utf8")
           } catch (rollbackError) {
             rollbackErrors.push(rollbackError)
           }
@@ -595,17 +595,17 @@ export function createNoteRepository(rootPath: string): NoteRepository {
           }
         }
 
-        if (wroteNextNote && nextNotePath !== normalizedNotePath && existsSync(nextNotePath)) {
+        if (wroteNextNote && nextNotePath !== normalizedNotePath && fs.existsSync(nextNotePath)) {
           try {
-            rmSync(nextNotePath, { force: true })
+            fs.rmSync(nextNotePath, { force: true })
           } catch (rollbackError) {
             rollbackErrors.push(rollbackError)
           }
         }
 
-        if (wroteNextSidecar && nextSidecarPath !== previousSidecarPath && existsSync(nextSidecarPath)) {
+        if (wroteNextSidecar && nextSidecarPath !== previousSidecarPath && fs.existsSync(nextSidecarPath)) {
           try {
-            rmSync(nextSidecarPath, { force: true })
+            fs.rmSync(nextSidecarPath, { force: true })
           } catch (rollbackError) {
             rollbackErrors.push(rollbackError)
           }
@@ -658,7 +658,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
           }
         }
 
-        renameSync(renameTarget.previousPath, renameTarget.nextPath)
+        fs.renameSync(renameTarget.previousPath, renameTarget.nextPath)
         renamedFolder = true
 
         for (const { next } of affectedSidecars) {
@@ -679,7 +679,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
         }
         if (renamedFolder) {
           try {
-            renameSync(renameTarget.nextPath, renameTarget.previousPath)
+            fs.renameSync(renameTarget.nextPath, renameTarget.previousPath)
           } catch (rollbackError) {
             rollbackErrors.push(rollbackError)
           }
@@ -707,7 +707,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       const existing = this.read(normalizedNotePath)
       const previousKey = existing.frontmatter.id
       const previousSidecarPath = sidecars.getSidecarPath(previousKey)
-      const existingSidecar = existsSync(previousSidecarPath) ? sidecars.read(previousKey) : buildExistingSidecar(existing)
+      const existingSidecar = fs.existsSync(previousSidecarPath) ? sidecars.read(previousKey) : buildExistingSidecar(existing)
       const destination = assertNormalFolderRelativePath(normalizedRootPath, destinationFolderRelativePath)
 
       if (existingSidecar.type !== "normal" || existing.frontmatter.archivedAt !== undefined || !previousRelativePath.startsWith("note/")) {
@@ -718,7 +718,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
 
       const nextRelativePath = joinPortableRelativePath(destination.relativePath, path.basename(previousRelativePath))
       const nextNotePath = assertPathInsideRoot(normalizedRootPath, path.join(normalizedRootPath, nextRelativePath))
-      if (nextNotePath !== normalizedNotePath && existsSync(nextNotePath)) {
+      if (nextNotePath !== normalizedNotePath && fs.existsSync(nextNotePath)) {
         throw new UsageError(`Could not move note '${previousRelativePath}'.`, {
           hint: "A note file already exists in the destination folder.",
         })
@@ -727,7 +727,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       let movedNoteFile = false
       try {
         if (nextNotePath !== normalizedNotePath) {
-          renameSync(normalizedNotePath, nextNotePath)
+          fs.renameSync(normalizedNotePath, nextNotePath)
           movedNoteFile = true
         }
         sidecars.write({ ...existingSidecar, relativePath: nextRelativePath, updatedAt: updatedAt ?? existingSidecar.updatedAt })
@@ -735,7 +735,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
         const rollbackErrors: unknown[] = []
         if (movedNoteFile) {
           try {
-            renameSync(nextNotePath, normalizedNotePath)
+            fs.renameSync(nextNotePath, normalizedNotePath)
           } catch (rollbackError) {
             rollbackErrors.push(rollbackError)
           }
@@ -758,7 +758,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
     },
 
     keyExists(key) {
-      return noteKeyExists(normalizedRootPath, key) || existsSync(sidecars.getSidecarPath(key))
+      return noteKeyExists(normalizedRootPath, key) || fs.existsSync(sidecars.getSidecarPath(key))
     },
 
     archive(notePath, archivedAt) {
@@ -766,7 +766,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       const currentRelativePath = toRootRelativePath(normalizedRootPath, normalizedNotePath)
       const existing = this.read(normalizedNotePath)
       const existingSidecarPath = sidecars.getSidecarPath(existing.frontmatter.id)
-      const existingSidecar = existsSync(existingSidecarPath)
+      const existingSidecar = fs.existsSync(existingSidecarPath)
         ? sidecars.read(existing.frontmatter.id)
         : buildSidecar(
             existing.frontmatter,
@@ -791,17 +791,17 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       let removedSourceNote = false
 
       try {
-        mkdirSync(path.dirname(archivedNotePath), { recursive: true })
+        fs.mkdirSync(path.dirname(archivedNotePath), { recursive: true })
 
-        if (archivedNotePath !== normalizedNotePath && existsSync(archivedNotePath)) {
+        if (archivedNotePath !== normalizedNotePath && fs.existsSync(archivedNotePath)) {
           throw new Error(`Archive destination already exists: ${archivedRelativePath}.`)
         }
 
-        writeFileSync(archivedNotePath, markdown, { encoding: "utf8", flag: "wx" })
+        fs.writeFileSync(archivedNotePath, markdown, { encoding: "utf8", flag: "wx" })
         wroteArchivedCopy = true
 
         if (archivedNotePath !== normalizedNotePath) {
-          rmSync(normalizedNotePath)
+          fs.rmSync(normalizedNotePath)
           removedSourceNote = true
         }
 
@@ -811,7 +811,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
 
         if (removedSourceNote && archivedNotePath !== normalizedNotePath) {
           try {
-            writeFileSync(
+            fs.writeFileSync(
               normalizedNotePath,
               serializePlainNote({
                 body: existing.body,
@@ -824,9 +824,9 @@ export function createNoteRepository(rootPath: string): NoteRepository {
           }
         }
 
-        if (wroteArchivedCopy && archivedNotePath !== normalizedNotePath && existsSync(archivedNotePath)) {
+        if (wroteArchivedCopy && archivedNotePath !== normalizedNotePath && fs.existsSync(archivedNotePath)) {
           try {
-            rmSync(archivedNotePath, { force: true })
+            fs.rmSync(archivedNotePath, { force: true })
           } catch (rollbackError) {
             rollbackErrors.push(rollbackError)
           }
@@ -854,32 +854,32 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       const relativePath = toRootRelativePath(normalizedRootPath, normalizedNotePath)
       const existing = this.read(normalizedNotePath)
       const sidecarPath = sidecars.getSidecarPath(existing.frontmatter.id)
-      const previousRaw = readFileSync(normalizedNotePath, "utf8")
-      const existingSidecar = existsSync(sidecarPath) ? sidecars.read(existing.frontmatter.id) : undefined
+      const previousRaw = fs.readFileSync(normalizedNotePath, "utf8")
+      const existingSidecar = fs.existsSync(sidecarPath) ? sidecars.read(existing.frontmatter.id) : undefined
       let removedNote = false
       let removedSidecar = false
 
       try {
-        rmSync(normalizedNotePath)
+        fs.rmSync(normalizedNotePath)
         removedNote = true
 
-        if (existsSync(sidecarPath)) {
-          rmSync(sidecarPath)
+        if (fs.existsSync(sidecarPath)) {
+          fs.rmSync(sidecarPath)
           removedSidecar = true
         }
       } catch (error) {
         const rollbackErrors: unknown[] = []
 
-        if (removedNote && !existsSync(normalizedNotePath)) {
+        if (removedNote && !fs.existsSync(normalizedNotePath)) {
           try {
-            mkdirSync(path.dirname(normalizedNotePath), { recursive: true })
-            writeFileSync(normalizedNotePath, previousRaw, "utf8")
+            fs.mkdirSync(path.dirname(normalizedNotePath), { recursive: true })
+            fs.writeFileSync(normalizedNotePath, previousRaw, "utf8")
           } catch (rollbackError) {
             rollbackErrors.push(rollbackError)
           }
         }
 
-        if (removedSidecar && existingSidecar !== undefined && !existsSync(sidecarPath)) {
+        if (removedSidecar && existingSidecar !== undefined && !fs.existsSync(sidecarPath)) {
           try {
             sidecars.write(existingSidecar)
           } catch (rollbackError) {
@@ -913,7 +913,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
 
       try {
         for (const notesPath of [getNormalNotesPath(normalizedRootPath), getDraftNotesPath(normalizedRootPath), getArchiveNotesPath(normalizedRootPath)]) {
-          if (!existsSync(notesPath)) {
+          if (!fs.existsSync(notesPath)) {
             continue
           }
 

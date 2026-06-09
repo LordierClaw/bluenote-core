@@ -1,4 +1,4 @@
-import { describe, test } from "bun:test"
+import { describe, test } from "node:test"
 import assert from "node:assert/strict"
 import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
@@ -51,7 +51,13 @@ describe("package boundary enforcement", () => {
     assert.equal(packageJson.version, "0.1.0")
     assert.equal(packageJson.engines.node, ">=18")
     assert.equal(packageJson.engines.bun, undefined)
+    assert.equal(packageJson.devDependencies?.["@types/bun"], undefined)
+    assert.equal(packageJson.scripts.test.includes("bun"), false)
+    assert.equal(packageJson.packageManager.startsWith("npm@"), true)
+    assert.equal(packageJson.packageManager.startsWith("bun@"), false)
+    assert.equal(packageJson.files.includes("CHANGELOG.md"), false)
     assert.deepEqual(Object.keys(packageJson.exports), ["."])
+    assert.equal(Object.keys(packageJson.exports).length, 1)
     assert.equal(packageJson.main, "./dist/index.js")
     assert.equal(packageJson.types, "./dist/index.d.ts")
   })

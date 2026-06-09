@@ -1,6 +1,6 @@
-import { test, spyOn } from "bun:test"
+import { mock, test } from "node:test"
 import assert from "node:assert/strict"
-import * as fs from "node:fs"
+import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -64,7 +64,7 @@ test("sidecar repository create-path write failures do not leave a partial sidec
     const sidecarPath = repository.getSidecarPath(FIXED_SIDECAR.key)
     const originalWriteFileSync = fs.writeFileSync
     const simulatedFailure = new Error("simulated partial sidecar write failure")
-    const writeMock = spyOn(fs, "writeFileSync").mockImplementation((...args: Parameters<typeof fs.writeFileSync>) => {
+    const writeMock = mock.method(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
       const [targetPath, _data, options] = args
       const targetPathString = String(targetPath)
 
@@ -87,7 +87,7 @@ test("sidecar repository create-path write failures do not leave a partial sidec
         },
       )
     } finally {
-      writeMock.mockRestore()
+      writeMock.mock.restore()
     }
 
     await assert.rejects(() => access(sidecarPath))
@@ -112,7 +112,7 @@ test("sidecar repository overwrite-path write failures preserve the existing sid
     }
     const originalWriteFileSync = fs.writeFileSync
     const simulatedFailure = new Error("simulated partial sidecar overwrite failure")
-    const writeMock = spyOn(fs, "writeFileSync").mockImplementation((...args: Parameters<typeof fs.writeFileSync>) => {
+    const writeMock = mock.method(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
       const [targetPath, _data, options] = args
       const targetPathString = String(targetPath)
 
@@ -135,7 +135,7 @@ test("sidecar repository overwrite-path write failures preserve the existing sid
         },
       )
     } finally {
-      writeMock.mockRestore()
+      writeMock.mock.restore()
     }
 
     assert.equal(await readFile(sidecarPath, "utf8"), originalJson)

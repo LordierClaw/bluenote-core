@@ -9,7 +9,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["bun", "node"],
+    "types": ["node"],
     "baseUrl": ".",
     "paths": {
       "@lordierclaw/bluenote-core": ["src/index.ts"]

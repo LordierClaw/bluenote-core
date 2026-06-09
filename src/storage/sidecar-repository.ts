@@ -1,5 +1,5 @@
 import path from "node:path"
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import fs from "node:fs"
 
 import { STATE_NOTES_DIRECTORY } from "../config/root"
 import { UsageError } from "../core/errors"
@@ -43,12 +43,12 @@ function getTemporarySidecarPath(sidecarPath: string): string {
 }
 
 function removeTemporarySidecar(sidecarPath: string): void {
-  if (!existsSync(sidecarPath)) {
+  if (!fs.existsSync(sidecarPath)) {
     return
   }
 
   try {
-    rmSync(sidecarPath, { force: true })
+    fs.rmSync(sidecarPath, { force: true })
   } catch {
     // Best-effort cleanup: preserve the original filesystem failure and error shape.
   }
@@ -70,7 +70,7 @@ export function createSidecarRepository(rootPath: string): SidecarRepository {
       let rawJson: string
 
       try {
-        rawJson = readFileSync(sidecarPath, "utf8")
+        rawJson = fs.readFileSync(sidecarPath, "utf8")
       } catch (error) {
         wrapSidecarRepositoryError("read", path.join(STATE_NOTES_DIRECTORY, `${key}.json`), error)
       }
@@ -95,9 +95,9 @@ export function createSidecarRepository(rootPath: string): SidecarRepository {
       const temporarySidecarPath = getTemporarySidecarPath(sidecarPath)
 
       try {
-        mkdirSync(path.dirname(sidecarPath), { recursive: true })
-        writeFileSync(temporarySidecarPath, JSON.stringify(canonicalSidecar, null, 2) + "\n", "utf8")
-        renameSync(temporarySidecarPath, sidecarPath)
+        fs.mkdirSync(path.dirname(sidecarPath), { recursive: true })
+        fs.writeFileSync(temporarySidecarPath, JSON.stringify(canonicalSidecar, null, 2) + "\n", "utf8")
+        fs.renameSync(temporarySidecarPath, sidecarPath)
       } catch (error) {
         removeTemporarySidecar(temporarySidecarPath)
         wrapSidecarRepositoryError("write", path.join(STATE_NOTES_DIRECTORY, `${canonicalSidecar.key}.json`), error)

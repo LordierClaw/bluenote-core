@@ -1,7 +1,8 @@
-import { test } from "bun:test"
+import { test } from "node:test"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
+import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
@@ -78,15 +79,23 @@ async function enqueueInChildProcess(
       },
     })
   `
-  const child = Bun.spawn([process.execPath, "--eval", source], {
-    stderr: "pipe",
-    stdout: "pipe",
+  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], {
+    stdio: ["ignore", "pipe", "pipe"],
   })
-  const exitCode = await child.exited
+
+  const stdoutChunks: Buffer[] = []
+  const stderrChunks: Buffer[] = []
+  child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk))
+  child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk))
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject)
+    child.once("exit", resolve)
+  })
 
   if (exitCode !== 0) {
-    const stderr = await new Response(child.stderr).text()
-    const stdout = await new Response(child.stdout).text()
+    const stdout = Buffer.concat(stdoutChunks).toString("utf8")
+    const stderr = Buffer.concat(stderrChunks).toString("utf8")
     throw new Error(`enqueue child failed with exit ${exitCode}\nstdout:\n${stdout}\nstderr:\n${stderr}`)
   }
 }
