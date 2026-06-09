@@ -25,7 +25,8 @@ if (testFiles.length === 0) {
   throw new Error("No test files found under tests")
 }
 
-const child = spawn(process.execPath, ["--import", "tsx", "--test", ...testFiles], {
+const registerFlag = Number(process.versions.node.split(".")[0]) >= 20 ? "--import" : "--loader"
+const child = spawn(process.execPath, [registerFlag, "tsx", "--test", ...testFiles], {
   stdio: "inherit",
 })
 

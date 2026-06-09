@@ -40,7 +40,7 @@ Do not import `src/*`, `dist/*`, or other private paths. The package exports onl
 
 ## Requirements
 
-- Node.js 18 or newer
+- Node.js 16.14 or newer
 - npm
 
 ## Commands

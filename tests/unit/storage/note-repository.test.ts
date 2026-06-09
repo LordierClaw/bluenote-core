@@ -1,6 +1,20 @@
-import { mock, test } from "node:test"
+import { test } from "vitest"
 import assert from "node:assert/strict"
 import fs from "node:fs"
+
+type MockedMethod<T, K extends keyof T> = { mock: { restore(): void } }
+
+function mockMethod<T extends object, K extends keyof T>(object: T, method: K, implementation: T[K]): MockedMethod<T, K> {
+  const original = object[method]
+  object[method] = implementation
+  return {
+    mock: {
+      restore() {
+        object[method] = original
+      },
+    },
+  }
+}
 import os from "node:os"
 import path from "node:path"
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
@@ -351,7 +365,7 @@ test("repository archive rolls back the destination file when removing the sourc
     const repository = createNoteRepository(rootPath)
     const originalRmSync = fs.rmSync
     const sourceRemovalFailure = new Error("simulated source removal failure")
-    const rmMock = mock.method(fs, "rmSync", (...args: Parameters<typeof fs.rmSync>) => {
+    const rmMock = mockMethod(fs, "rmSync", (...args: Parameters<typeof fs.rmSync>) => {
       const [targetPath] = args
 
       if (path.resolve(String(targetPath)) === path.resolve(sourcePath)) {
@@ -436,7 +450,7 @@ test("syncEditedNote rolls back the body with the atomic writer when sidecar per
     const originalSidecar = await readFile(sidecarPath, "utf8")
     const originalWriteFileSync = fs.writeFileSync
     const sidecarFailure = new Error("simulated sidecar write failure")
-    const writeFileMock = mock.method(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
+    const writeFileMock = mockMethod(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
       const [target] = args
 
       if (path.resolve(String(target)).startsWith(path.resolve(sidecarPath))) {
