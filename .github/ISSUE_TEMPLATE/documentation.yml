@@ -1,0 +1,23 @@
+name: Documentation issue
+description: Report missing, confusing, or stale documentation.
+title: "docs: "
+labels: [documentation]
+body:
+  - type: textarea
+    id: location
+    attributes:
+      label: Documentation location
+      description: Link or name the README, contributing guide, template, or package docs section.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is unclear or wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: If you know the wording or example that would help, include it here.

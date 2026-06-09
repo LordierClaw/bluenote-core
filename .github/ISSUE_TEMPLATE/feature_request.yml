@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a scoped improvement to the headless BlueNote core package.
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or integration problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the smallest core-library change that would solve it.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope checks
+      options:
+        - label: Preserves local/offline use for normal note workflows.
+          required: true
+        - label: Preserves plain Markdown note bodies.
+          required: true
+        - label: Preserves sidecar metadata under the existing app-state layout unless explicitly planned.
+          required: true
+        - label: Does not require terminal UI, OpenTUI, or a specific client.
+          required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
