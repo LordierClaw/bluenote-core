@@ -1,12 +1,16 @@
 # @lordierclaw/bluenote-core
 
-Headless BlueNote core package extracted from BlueNote Term. This package contains the storage, note business logic, search/indexing, configuration, domain helpers, and AI support code used by BlueNote.
+Headless BlueNote core for local-first Markdown notes. This package contains the storage, note business logic, search/indexing, configuration, domain helpers, and AI support code used by BlueNote.
 
-It intentionally does **not** include the terminal UI, OpenTUI rendering, CLI entrypoints, editor integration, clipboard integration, or other terminal-client behavior.
+It intentionally does **not** include terminal UI, OpenTUI rendering, CLI entrypoints, editor integration, clipboard integration, server, sync, or other terminal-client behavior.
 
-## Install / consume
+## Install
 
-During Phase 8.2 extraction, recommended dependency strategies are:
+```sh
+npm install @lordierclaw/bluenote-core
+```
+
+Until the package is published to npm, consume a local checkout after building it:
 
 ```json
 {
@@ -16,25 +20,14 @@ During Phase 8.2 extraction, recommended dependency strategies are:
 }
 ```
 
-or from a tagged GitHub release:
-
-```json
-{
-  "dependencies": {
-    "@lordierclaw/bluenote-core": "github:lordierclaw/bluenote-core#v0.1.0"
-  }
-}
+```sh
+cd ../bluenote-core
+npm run build
 ```
 
-Future npm consumers should use the published semver range:
+The repository does not track generated `dist/` artifacts, so direct GitHub branch/tag dependencies are not the recommended consumption path unless that tag intentionally includes built output.
 
-```json
-{
-  "dependencies": {
-    "@lordierclaw/bluenote-core": "^0.1.0"
-  }
-}
-```
+## Usage
 
 Import only the package root:
 
@@ -42,19 +35,25 @@ Import only the package root:
 import { createBlueNoteCore, createNote, searchNotes } from "@lordierclaw/bluenote-core"
 ```
 
-Never import `src/*`, `dist/*`, or other private paths. The package exports only `.`.
+Do not import `src/*`, `dist/*`, or other private paths. The package exports only `.`.
+
+## Requirements
+
+- Runtime: Node.js 18 or newer
+- Development/test runner: Bun
 
 ## Commands
 
 ```sh
 bun install
-bun run typecheck
-bun run build
-bun test
+npm run typecheck
+npm run build
+npm run test
+npm run check
 ```
 
-`bun run build` emits runnable ESM JavaScript and TypeScript declarations to `dist/`.
+`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. Tests currently use Bun as the development test runner. The generated `dist/` directory is included in npm packages but is not tracked in git.
 
-## Scope
+## Scope and compatibility
 
-This repository is an extraction scaffold for BlueNote core. It preserves the existing public API, storage layout, note format, search semantics, and AI behavior from the source core package; it is not a redesign.
+This repository preserves the existing public API, storage layout, note file format, search semantics, and AI behavior from the extracted BlueNote core package. It is a standalone library repository, not a redesign of BlueNote and not a UI/client package.

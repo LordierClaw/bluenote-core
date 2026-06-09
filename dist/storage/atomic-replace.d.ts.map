@@ -1,1 +1,0 @@
-{"version":3,"file":"atomic-replace.d.ts","sourceRoot":"","sources":["../../src/storage/atomic-replace.ts"],"names":[],"mappings":"AAEA,MAAM,WAAW,4BAA4B;IAC3C,QAAQ,CAAC,EAAE,MAAM,CAAC,QAAQ,CAAA;CAC3B;AAED;;;;;;;;GAQG;AACH,wBAAgB,qBAAqB,CAAC,aAAa,EAAE,MAAM,EAAE,UAAU,EAAE,MAAM,EAAE,OAAO,GAAE,4BAAiC,GAAG,IAAI,CAQjI"}

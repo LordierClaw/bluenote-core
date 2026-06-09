@@ -2,17 +2,25 @@ import { describe, test } from "bun:test"
 import assert from "node:assert/strict"
 import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
-const repoRoot = path.resolve(import.meta.dir, "../../..")
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")
 
 async function collectTsFiles(relativeDir: string): Promise<string[]> {
   const absoluteDir = path.join(repoRoot, relativeDir)
-  const entries = await readdir(absoluteDir, { recursive: true, withFileTypes: true })
+  const entries = await readdir(absoluteDir, { withFileTypes: true })
+  const files: string[] = []
 
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-    .map((entry) => path.relative(repoRoot, path.join(entry.parentPath, entry.name)))
-    .sort()
+  for (const entry of entries) {
+    const entryPath = path.join(absoluteDir, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...await collectTsFiles(path.relative(repoRoot, entryPath)))
+    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+      files.push(path.relative(repoRoot, entryPath))
+    }
+  }
+
+  return files.sort()
 }
 
 async function read(relativePath: string): Promise<string> {
@@ -39,6 +47,10 @@ describe("package boundary enforcement", () => {
   test("package exports only the public root entrypoint", async () => {
     const packageJson = JSON.parse(await read("package.json"))
 
+    assert.equal(packageJson.name, "@lordierclaw/bluenote-core")
+    assert.equal(packageJson.version, "0.1.0")
+    assert.equal(packageJson.engines.node, ">=18")
+    assert.equal(packageJson.engines.bun, undefined)
     assert.deepEqual(Object.keys(packageJson.exports), ["."])
     assert.equal(packageJson.main, "./dist/index.js")
     assert.equal(packageJson.types, "./dist/index.d.ts")

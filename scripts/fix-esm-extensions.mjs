@@ -1,17 +1,19 @@
 import { readdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
-const distRoot = path.resolve(import.meta.dir, "..", "dist")
+const scriptDir = path.dirname(fileURLToPath(import.meta.url))
+const distRoot = path.resolve(scriptDir, "..", "dist")
 
-async function collectJsFiles(dir: string): Promise<string[]> {
+async function collectOutputFiles(dir) {
   const entries = await readdir(dir, { withFileTypes: true })
-  const files: string[] = []
+  const files = []
 
   for (const entry of entries) {
     const entryPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      files.push(...await collectJsFiles(entryPath))
-    } else if (entry.isFile() && entry.name.endsWith(".js")) {
+      files.push(...await collectOutputFiles(entryPath))
+    } else if (entry.isFile() && (entry.name.endsWith(".js") || entry.name.endsWith(".d.ts"))) {
       files.push(entryPath)
     }
   }
@@ -19,7 +21,7 @@ async function collectJsFiles(dir: string): Promise<string[]> {
   return files
 }
 
-function withJsExtension(specifier: string): string {
+function withJsExtension(specifier) {
   if (!specifier.startsWith(".")) {
     return specifier
   }
@@ -31,12 +33,13 @@ function withJsExtension(specifier: string): string {
   return `${specifier}.js`
 }
 
-const jsFiles = await collectJsFiles(distRoot)
+const outputFiles = await collectOutputFiles(distRoot)
 
-for (const file of jsFiles) {
+for (const file of outputFiles) {
   const source = await readFile(file, "utf8")
   const updated = source
     .replace(/(from\s+["'])(\.{1,2}\/[^"']+)(["'])/g, (_match, prefix, specifier, suffix) => `${prefix}${withJsExtension(specifier)}${suffix}`)
+    .replace(/(import\s+["'])(\.{1,2}\/[^"']+)(["'])/g, (_match, prefix, specifier, suffix) => `${prefix}${withJsExtension(specifier)}${suffix}`)
     .replace(/(import\(\s*["'])(\.{1,2}\/[^"']+)(["']\s*\))/g, (_match, prefix, specifier, suffix) => `${prefix}${withJsExtension(specifier)}${suffix}`)
 
   if (updated !== source) {
