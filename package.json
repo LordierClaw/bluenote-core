@@ -12,7 +12,13 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    }
+    },
+    "./search/contains-match": {
+      "types": "./dist/search/contains-match.d.ts",
+      "import": "./dist/search/contains-match.js",
+      "default": "./dist/search/contains-match.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
