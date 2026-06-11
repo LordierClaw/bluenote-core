@@ -1,4 +1,4 @@
-import { test } from "node:test"
+import { test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
@@ -58,7 +58,7 @@ async function enqueueInChildProcess(
   isoTimestamp: string,
   options: { markerPath?: string; delayBeforeWriteMs?: number } = {},
 ): Promise<void> {
-  const queueServiceUrl = pathToFileURL(path.resolve("src/ai/queue-service.ts")).href
+  const queueServiceUrl = pathToFileURL(path.resolve("dist/ai/queue-service.js")).href
   const source = `
     import { writeFileSync } from "node:fs"
     import { enqueueDescribeNoteJob } from ${JSON.stringify(queueServiceUrl)}
@@ -79,7 +79,7 @@ async function enqueueInChildProcess(
       },
     })
   `
-  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], {
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", source], {
     stdio: ["ignore", "pipe", "pipe"],
   })
 

@@ -1,5 +1,6 @@
 import type { CodexAuth, CodexAuthRepository } from "./codex-auth-repository"
 import { sanitizeCodexAuthErrorMessage } from "./error-redaction"
+import { getDefaultFetch } from "../platform/fetch"
 
 export const DEFAULT_CODEX_AUTH_ISSUER = "https://auth.openai.com"
 export const DEFAULT_CODEX_AUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -229,7 +230,7 @@ function buildAuthFromTokenResponse(input: {
 }
 
 export function createCodexAuthClient(options: CodexAuthClientOptions = {}): CodexAuthClient {
-  const fetchImpl = options.fetch ?? fetch
+  const fetchImpl = options.fetch ?? getDefaultFetch()
   const issuer = normalizeIssuer(options.issuer ?? DEFAULT_CODEX_AUTH_ISSUER)
   const clientId = options.clientId ?? DEFAULT_CODEX_AUTH_CLIENT_ID
   const timeoutMs = Math.max(0, Math.min(options.loginTimeoutMs ?? DEFAULT_CODEX_LOGIN_TIMEOUT_MS, DEFAULT_CODEX_LOGIN_TIMEOUT_MS))

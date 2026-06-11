@@ -1,6 +1,20 @@
-import { mock, test } from "node:test"
+import { test } from "vitest"
 import assert from "node:assert/strict"
 import fs from "node:fs"
+
+type MockedMethod<T, K extends keyof T> = { mock: { restore(): void } }
+
+function mockMethod<T extends object, K extends keyof T>(object: T, method: K, implementation: T[K]): MockedMethod<T, K> {
+  const original = object[method]
+  object[method] = implementation
+  return {
+    mock: {
+      restore() {
+        object[method] = original
+      },
+    },
+  }
+}
 import os from "node:os"
 import path from "node:path"
 
@@ -64,7 +78,7 @@ test("sidecar repository create-path write failures do not leave a partial sidec
     const sidecarPath = repository.getSidecarPath(FIXED_SIDECAR.key)
     const originalWriteFileSync = fs.writeFileSync
     const simulatedFailure = new Error("simulated partial sidecar write failure")
-    const writeMock = mock.method(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
+    const writeMock = mockMethod(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
       const [targetPath, _data, options] = args
       const targetPathString = String(targetPath)
 
@@ -112,7 +126,7 @@ test("sidecar repository overwrite-path write failures preserve the existing sid
     }
     const originalWriteFileSync = fs.writeFileSync
     const simulatedFailure = new Error("simulated partial sidecar overwrite failure")
-    const writeMock = mock.method(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
+    const writeMock = mockMethod(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
       const [targetPath, _data, options] = args
       const targetPathString = String(targetPath)
 

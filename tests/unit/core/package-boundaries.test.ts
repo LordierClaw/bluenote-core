@@ -1,4 +1,4 @@
-import { describe, test } from "node:test"
+import { describe, test } from "vitest"
 import assert from "node:assert/strict"
 import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
@@ -49,7 +49,7 @@ describe("package boundary enforcement", () => {
 
     assert.equal(packageJson.name, "@lordierclaw/bluenote-core")
     assert.equal(packageJson.version, "0.1.0")
-    assert.equal(packageJson.engines.node, ">=18")
+    assert.equal(packageJson.engines.node, ">=16.14 <17 || >=18")
     assert.equal(packageJson.engines.bun, undefined)
     assert.equal(packageJson.devDependencies?.["@types/bun"], undefined)
     assert.equal(packageJson.scripts.test.includes("bun"), false)

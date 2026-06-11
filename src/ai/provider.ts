@@ -1,4 +1,5 @@
 import { UsageError } from "../core/errors"
+import { getDefaultFetch } from "../platform/fetch"
 import type { AiConfig } from "./config-schema"
 import { createCodexTextGenerationClient, type CodexProviderFetch, type CodexTextGenerationAuthProvider } from "./codex-client"
 import type { CodexAuth } from "./codex-auth-repository"
@@ -33,7 +34,7 @@ export class CodexProviderSetupRequiredError extends UsageError {
 
 export function createAiTextGenerationClient(config: AiConfig, options: AiProviderFactoryOptions = {}): AiTextGenerationClient {
   if (config.provider === "openai-compatible") {
-    const client = createOpenAiCompatibleClient({ fetch: options.fetch ?? fetch })
+    const client = createOpenAiCompatibleClient({ fetch: options.fetch ?? getDefaultFetch() })
     return {
       createChatCompletion(request) {
         return client.createChatCompletion({
@@ -51,7 +52,7 @@ export function createAiTextGenerationClient(config: AiConfig, options: AiProvid
   }
 
   const client = createCodexTextGenerationClient({
-    fetch: options.fetch ?? fetch,
+    fetch: options.fetch ?? getDefaultFetch(),
     auth: options.codexAuth,
     model: config.model,
     now: options.now,

@@ -4,7 +4,7 @@
   "description": "Headless BlueNote core for local-first Markdown notes.",
   "license": "Apache-2.0",
   "type": "module",
-  "packageManager": "npm@10.8.2",
+  "packageManager": "npm@8.5.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -21,24 +21,28 @@
     "package.json"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=16.14 <17 || >=18"
   },
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "build": "npm run clean && tsc -p tsconfig.build.json && node scripts/fix-esm-extensions.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node scripts/run-tests.mjs",
-    "check": "npm run typecheck && npm run build && node scripts/smoke-node-runtime.mjs && npm run test",
+    "test": "npm run build && vitest run",
+    "check": "npm run typecheck && npm run test && node scripts/smoke-node-runtime.mjs",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
     "js-yaml": "4.1.1",
     "minisearch": "6.3.0",
-    "sql.js": "1.10.3"
+    "sql.js": "1.10.3",
+    "node-fetch": "2.7.0"
   },
   "devDependencies": {
-    "@types/node": "18.19.112",
-    "tsx": "4.20.3",
-    "typescript": "5.8.3"
+    "@types/node": "16.18.126",
+    "@types/node-fetch": "2.6.13",
+    "tsx": "3.14.0",
+    "typescript": "5.8.3",
+    "vitest": "0.34.6"
   }
 }

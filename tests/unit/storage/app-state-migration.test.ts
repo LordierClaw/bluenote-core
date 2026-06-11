@@ -1,6 +1,20 @@
-import { mock, test } from "node:test"
+import { test } from "vitest"
 import assert from "node:assert/strict"
 import fs from "node:fs"
+
+type MockedMethod<T, K extends keyof T> = { mock: { restore(): void } }
+
+function mockMethod<T extends object, K extends keyof T>(object: T, method: K, implementation: T[K]): MockedMethod<T, K> {
+  const original = object[method]
+  object[method] = implementation
+  return {
+    mock: {
+      restore() {
+        object[method] = original
+      },
+    },
+  }
+}
 import os from "node:os"
 import path from "node:path"
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
@@ -159,7 +173,7 @@ test("migrateLegacyAppStateToData does not overwrite a destination created durin
     await writeFile(sourcePath, "{\"title\":\"State\"}", "utf8")
 
     const originalCopyFileSync = fs.copyFileSync
-    const copyMock = mock.method(fs, "copyFileSync", (...args: Parameters<typeof fs.copyFileSync>) => {
+    const copyMock = mockMethod(fs, "copyFileSync", (...args: Parameters<typeof fs.copyFileSync>) => {
       const [source, destination, mode] = args
       if (String(destination) === destinationPath) {
         fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
