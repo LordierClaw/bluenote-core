@@ -53,7 +53,17 @@ npm test
 npm run check
 ```
 
-`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. `npm test` runs the TypeScript test suite with Node's test runner. `npm run check` runs typecheck, build, package import smoke check, and tests. The generated `dist/` directory is included in npm packages but is not tracked in git.
+`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. `npm test` rebuilds first, then runs the TypeScript test suite with Vitest so child-process tests never use stale generated output. `npm run check` runs typecheck, tests, and package import smoke verification. The generated `dist/` directory is included in npm packages and should be refreshed whenever source changes are intentionally shipped with built output.
+
+## Documentation
+
+The docs folder follows the same top-level organization as BlueNote terminal docs:
+
+- [Product overview](docs/product/overview.md)
+- [Runtime and dependencies](docs/architecture/runtime-and-dependencies.md)
+- [Phase 8 core Node 16.14 compatibility](docs/phases/phase-8-core-node-16-14-compat.md)
+- [Node 16.14 compatibility plan](docs/plans/2026-06-11-node-16-14-compat.md)
+- [Package workflow](docs/workflow/package.md)
 
 ## Scope and compatibility
 

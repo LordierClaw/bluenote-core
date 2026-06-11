@@ -1,40 +1,40 @@
 # Dependencies
 node_modules/
 
-# Build output
+# Build and test output
 dist/
-*.tsbuildinfo
-
-# Test and coverage output
 coverage/
 .nyc_output/
+*.tsbuildinfo
+*.tgz
 
-# Logs
+# Caches
+.cache/
+.npm/
+.pnpm-store/
+.yarn/
+.eslintcache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Environment and local state
+.env
+.env.*
+!.env.example
+.tmp/
 *.log
 npm-debug.log*
 yarn-debug.log*
 
-# Environment
-.env
-.env.*
-!.env.example
-
-# Package manager state and caches
-.npm/
-.pnpm-store/
-.yarn/
-*.tgz
-
-# Local agent state and local-only setup notes
+# Local agent state
 .hermes/
-AGENTS.md
-.node-version
-.npmrc
 
 # OS and editor noise
 .DS_Store
 Thumbs.db
+.vscode/
 .idea/
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
+*.swp
+*.swo

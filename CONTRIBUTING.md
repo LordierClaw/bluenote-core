@@ -13,6 +13,14 @@ BlueNote core is a headless Node.js library for local-first Markdown notes.
 npm install
 ```
 
+## Documentation
+
+- Product scope: [docs/product/overview.md](docs/product/overview.md)
+- Runtime/dependency policy: [docs/architecture/runtime-and-dependencies.md](docs/architecture/runtime-and-dependencies.md)
+- Phase scope: [docs/phases/phase-8-core-node-16-14-compat.md](docs/phases/phase-8-core-node-16-14-compat.md)
+- Current plan: [docs/plans/2026-06-11-node-16-14-compat.md](docs/plans/2026-06-11-node-16-14-compat.md)
+- Package workflow: [docs/workflow/package.md](docs/workflow/package.md)
+
 ## Verification
 
 Run the full local check before opening a pull request:
