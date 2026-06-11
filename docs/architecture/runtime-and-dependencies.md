@@ -4,7 +4,7 @@
 
 - Support Node.js `16.14` or newer in the published package, while keeping modern Node.js compatibility for active development.
 - Use npm as the package manager for this repository; `.npmrc` keeps exact dependency versions for reproducible installs.
-- Emit runnable ESM JavaScript and TypeScript declarations into `dist/` through `npm run build`.
+- Emit runnable ESM JavaScript and TypeScript declarations into ignored `dist/` output through `npm run build`.
 - Keep the public import surface at the package root (`@lordierclaw/bluenote-core`) and do not rely on `src/*` or `dist/*` private paths from consumers.
 - Avoid native SQLite dependencies; use `sql.js` for rebuildable cache metadata.
 - Keep core headless. Terminal/client packages own command routing, OpenTUI rendering, editor launch, clipboard bridges, and user interaction.

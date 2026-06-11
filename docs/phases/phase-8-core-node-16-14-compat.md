@@ -7,7 +7,7 @@ This phase keeps `@lordierclaw/bluenote-core` usable in restricted Node.js envir
 - Support Node.js `16.14` or newer through package metadata, CI, and runtime-compatible dependencies.
 - Keep the public API, storage layout, note file format, search semantics, and AI behavior stable.
 - Keep terminal UI, CLI routing, OpenTUI rendering, editor launch, and clipboard behavior out of this repository.
-- Keep generated package output refreshed when a branch intentionally supports direct package consumption before an npm publish.
+- Keep generated package output out of git; build and package workflows generate `dist/` as needed.
 
 ## Verification
 

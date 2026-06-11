@@ -1,1 +1,0 @@
-{"version":3,"file":"app-state-migration.d.ts","sourceRoot":"","sources":["../../src/storage/app-state-migration.ts"],"names":[],"mappings":"AAgBA,MAAM,WAAW,uBAAuB;IACtC,MAAM,EAAE,MAAM,GAAG,UAAU,CAAA;IAC3B,iBAAiB,EAAE,MAAM,CAAA;IACzB,eAAe,EAAE,MAAM,CAAA;IACvB,aAAa,EAAE,MAAM,CAAA;CACtB;AA+OD,wBAAgB,2BAA2B,CAAC,QAAQ,EAAE,MAAM,GAAG,uBAAuB,CA6CrF"}

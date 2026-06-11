@@ -1,1 +1,0 @@
-{"version":3,"file":"plain-note.d.ts","sourceRoot":"","sources":["../../src/storage/plain-note.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,eAAe,CAAA;AAE9C,wBAAgB,sBAAsB,CAAC,YAAY,EAAE,MAAM,GAAG,MAAM,CAEnE;AAED,wBAAgB,cAAc,CAAC,YAAY,EAAE,MAAM,EAAE,UAAU,EAAE,MAAM,GAAG,SAAS,CAKlF;AAED,wBAAgB,kBAAkB,CAAC,IAAI,EAAE,SAAS,GAAG,MAAM,CAE1D"}

@@ -53,7 +53,7 @@ npm test
 npm run check
 ```
 
-`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. `npm test` rebuilds first, then runs the TypeScript test suite with Vitest so child-process tests never use stale generated output. `npm run check` runs typecheck, tests, and package import smoke verification. The generated `dist/` directory is included in npm packages and should be refreshed whenever source changes are intentionally shipped with built output.
+`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. `npm test` rebuilds first, then runs the TypeScript test suite with Vitest so child-process tests never use stale generated output. `npm run check` runs typecheck, tests, and package import smoke verification. The generated `dist/` directory is ignored by git and included only in built npm package artifacts.
 
 ## Documentation
 
