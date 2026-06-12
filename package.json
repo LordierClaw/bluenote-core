@@ -39,16 +39,16 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "js-yaml": "4.1.1",
-    "minisearch": "6.3.0",
-    "sql.js": "1.10.3",
-    "node-fetch": "2.7.0"
-  },
-  "devDependencies": {
     "@types/node": "16.18.126",
     "@types/node-fetch": "2.6.13",
+    "js-yaml": "4.1.1",
+    "minisearch": "6.3.0",
+    "node-fetch": "2.7.0",
+    "sql.js": "1.10.3",
+    "typescript": "5.8.3"
+  },
+  "devDependencies": {
     "tsx": "3.14.0",
-    "typescript": "5.8.3",
     "vitest": "0.34.6"
   }
 }
