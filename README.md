@@ -30,13 +30,20 @@ The repository does not track generated `dist/` artifacts, so direct GitHub bran
 
 ## Usage
 
-Import only the package root:
+Most core APIs are exported from the package root:
 
 ```ts
 import { createBlueNoteCore, createNote, searchNotes } from "@lordierclaw/bluenote-core"
 ```
 
-Do not import `src/*`, `dist/*`, or other private paths. The package exports only `.`.
+Public subpath exports are intentionally limited to lightweight helpers and shared contracts:
+
+```ts
+import { containsSearchQuery } from "@lordierclaw/bluenote-core/search/contains-match"
+import { BLUENOTE_DAEMON_API_VERSION } from "@lordierclaw/bluenote-core/api/daemon-contract"
+```
+
+Do not import `src/*`, `dist/*`, tests, or other private paths. Supported public entrypoints are the package root, `./search/contains-match`, `./api/daemon-contract`, and `./package.json`.
 
 ## Requirements
 
