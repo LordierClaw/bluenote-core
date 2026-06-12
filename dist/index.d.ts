@@ -26,6 +26,7 @@ export * from "./core/rebuild-indexes.js";
 export * from "./core/select-note.js";
 export * from "./core/search-notes.js";
 export * from "./core/show-note.js";
+export * from "./api/daemon-contract.js";
 export * from "./config/root.js";
 export * from "./ai/codex-auth-client.js";
 export * from "./ai/codex-auth-repository.js";

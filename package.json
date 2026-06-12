@@ -18,6 +18,11 @@
       "import": "./dist/search/contains-match.js",
       "default": "./dist/search/contains-match.js"
     },
+    "./api/daemon-contract": {
+      "types": "./dist/api/daemon-contract.d.ts",
+      "import": "./dist/api/daemon-contract.js",
+      "default": "./dist/api/daemon-contract.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

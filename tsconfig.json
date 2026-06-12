@@ -12,6 +12,7 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
+      "@lordierclaw/bluenote-core/api/daemon-contract": ["src/api/daemon-contract.ts"],
       "@lordierclaw/bluenote-core": ["src/index.ts"]
     },
     "forceConsistentCasingInFileNames": true
