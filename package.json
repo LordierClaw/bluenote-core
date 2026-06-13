@@ -12,7 +12,18 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    }
+    },
+    "./search/contains-match": {
+      "types": "./dist/search/contains-match.d.ts",
+      "import": "./dist/search/contains-match.js",
+      "default": "./dist/search/contains-match.js"
+    },
+    "./api/daemon-contract": {
+      "types": "./dist/api/daemon-contract.d.ts",
+      "import": "./dist/api/daemon-contract.js",
+      "default": "./dist/api/daemon-contract.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -33,14 +44,14 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "js-yaml": "4.1.1",
-    "minisearch": "6.3.0",
-    "sql.js": "1.10.3",
-    "node-fetch": "2.7.0"
-  },
-  "devDependencies": {
     "@types/node": "16.18.126",
     "@types/node-fetch": "2.6.13",
+    "js-yaml": "4.1.1",
+    "minisearch": "6.3.0",
+    "node-fetch": "2.7.0",
+    "sql.js": "1.10.3"
+  },
+  "devDependencies": {
     "tsx": "3.14.0",
     "typescript": "5.8.3",
     "vitest": "0.34.6"

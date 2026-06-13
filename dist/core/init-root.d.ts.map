@@ -1,0 +1,1 @@
+{"version":3,"file":"init-root.d.ts","sourceRoot":"","sources":["../../src/core/init-root.ts"],"names":[],"mappings":"AAAA,OAAO,EAAuB,KAAK,0BAA0B,EAAE,MAAM,gBAAgB,CAAA;AAMrF,MAAM,WAAW,eAAe;IAC9B,QAAQ,EAAE,MAAM,CAAA;CACjB;AAED,wBAAgB,QAAQ,CAAC,OAAO,GAAE,0BAA+B,GAAG,eAAe,CAgBlF"}

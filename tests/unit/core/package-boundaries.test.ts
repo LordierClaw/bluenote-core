@@ -44,7 +44,7 @@ function importSpecifiers(source: string): string[] {
 }
 
 describe("package boundary enforcement", () => {
-  test("package exports only the public root entrypoint", async () => {
+  test("package exports only public runtime and metadata entrypoints", async () => {
     const packageJson = JSON.parse(await read("package.json"))
 
     assert.equal(packageJson.name, "@lordierclaw/bluenote-core")
@@ -56,8 +56,19 @@ describe("package boundary enforcement", () => {
     assert.equal(packageJson.packageManager.startsWith("npm@"), true)
     assert.equal(packageJson.packageManager.startsWith("bun@"), false)
     assert.equal(packageJson.files.includes("CHANGELOG.md"), false)
-    assert.deepEqual(Object.keys(packageJson.exports), ["."])
-    assert.equal(Object.keys(packageJson.exports).length, 1)
+    assert.deepEqual(Object.keys(packageJson.exports), [".", "./search/contains-match", "./api/daemon-contract", "./package.json"])
+    assert.deepEqual(packageJson.exports["./search/contains-match"], {
+      types: "./dist/search/contains-match.d.ts",
+      import: "./dist/search/contains-match.js",
+      default: "./dist/search/contains-match.js",
+    })
+    assert.deepEqual(packageJson.exports["./api/daemon-contract"], {
+      types: "./dist/api/daemon-contract.d.ts",
+      import: "./dist/api/daemon-contract.js",
+      default: "./dist/api/daemon-contract.js",
+    })
+    assert.equal(packageJson.exports["./package.json"], "./package.json")
+    assert.equal(Object.keys(packageJson.exports).length, 4)
     assert.equal(packageJson.main, "./dist/index.js")
     assert.equal(packageJson.types, "./dist/index.d.ts")
   })

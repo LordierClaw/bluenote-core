@@ -6,6 +6,17 @@ It intentionally does **not** include terminal UI, OpenTUI rendering, CLI entryp
 
 ## Install
 
+Most users should install the BlueNote app entrypoint instead of installing the core library directly:
+
+```sh
+npm install -g @lordierclaw/bluenote
+npm install -g bluenote-webui   # optional browser UI
+npm install -g bluenote-term    # optional terminal UI
+bluenote doctor
+```
+
+Install `@lordierclaw/bluenote-core` directly only when building a client, distribution package, or library integration:
+
 ```sh
 npm install @lordierclaw/bluenote-core
 ```
@@ -28,15 +39,30 @@ npm run build
 
 The repository does not track generated `dist/` artifacts, so direct GitHub branch/tag dependencies are not the recommended consumption path unless that tag intentionally includes built output.
 
+For a sibling source checkout, build/check this package before clients or the distribution CLI:
+
+```sh
+cd ../bluenote-core
+npm ci --include=dev
+npm run check
+```
+
 ## Usage
 
-Import only the package root:
+Most core APIs are exported from the package root:
 
 ```ts
 import { createBlueNoteCore, createNote, searchNotes } from "@lordierclaw/bluenote-core"
 ```
 
-Do not import `src/*`, `dist/*`, or other private paths. The package exports only `.`.
+Public subpath exports are intentionally limited to lightweight helpers and shared contracts:
+
+```ts
+import { containsSearchQuery } from "@lordierclaw/bluenote-core/search/contains-match"
+import { BLUENOTE_DAEMON_API_VERSION } from "@lordierclaw/bluenote-core/api/daemon-contract"
+```
+
+Do not import `src/*`, `dist/*`, tests, or other private paths. Supported public entrypoints are the package root, `./search/contains-match`, `./api/daemon-contract`, and `./package.json`.
 
 ## Requirements
 

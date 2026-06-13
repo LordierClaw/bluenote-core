@@ -5,6 +5,7 @@ import path from "node:path"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 
 import {
+  collectContainsFieldMatches,
   containsSearchQuery,
   createNote,
   createSearchDocuments,
@@ -12,9 +13,18 @@ import {
   rebuildIndexes,
   rebuildIndexStore,
   searchNotes,
+  scoreContainsMatch,
   updateIndexedNote,
 } from "@lordierclaw/bluenote-core"
-import { containsSearchQuery as rootContainsSearchQuery } from "../../../src/search/contains-match"
+import {
+  collectContainsFieldMatches as rootCollectContainsFieldMatches,
+  containsSearchQuery as rootContainsSearchQuery,
+  scoreContainsMatch as rootScoreContainsMatch,
+} from "../../../src/search/contains-match"
+import {
+  collectContainsFieldMatches as subpathCollectContainsFieldMatches,
+  scoreContainsMatch as subpathScoreContainsMatch,
+} from "@lordierclaw/bluenote-core/search/contains-match"
 import { rebuildIndexes as rootRebuildIndexes } from "../../../src/core/rebuild-indexes"
 import { searchNotes as rootSearchNotes } from "../../../src/core/search-notes"
 import {
@@ -27,6 +37,10 @@ import { createSearchDocuments as rootCreateSearchDocuments } from "../../../src
 describe("@lordierclaw/bluenote-core search/rebuild/index exports", () => {
   test("exports package-local search APIs with root shim identity and literal contains search", async () => {
     assert.equal(containsSearchQuery, rootContainsSearchQuery)
+    assert.equal(scoreContainsMatch, rootScoreContainsMatch)
+    assert.equal(collectContainsFieldMatches, rootCollectContainsFieldMatches)
+    assert.equal(subpathScoreContainsMatch, rootScoreContainsMatch)
+    assert.equal(subpathCollectContainsFieldMatches, rootCollectContainsFieldMatches)
     assert.equal(rebuildIndexes, rootRebuildIndexes)
     assert.equal(searchNotes, rootSearchNotes)
     assert.equal(loadIndexStore, rootLoadIndexStore)
@@ -35,6 +49,11 @@ describe("@lordierclaw/bluenote-core search/rebuild/index exports", () => {
     assert.equal(createSearchDocuments, rootCreateSearchDocuments)
     assert.equal(containsSearchQuery("Alpha Project", "pha"), true)
     assert.equal(containsSearchQuery("Alpha Project", "apj"), false)
+    assert.ok(scoreContainsMatch("Alpha Project", "alpha") > scoreContainsMatch("Alpha Project", "project"))
+    assert.deepEqual(collectContainsFieldMatches("alpha", [
+      { field: "title", value: "Alpha Project", weight: 1.4 },
+      { field: "description", value: "No match" },
+    ]).map((match) => match.field), ["title"])
 
     const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-core-search-exports-"))
 

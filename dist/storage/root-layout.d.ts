@@ -1,0 +1,21 @@
+export declare const MANAGED_ROOT_LAYOUT: readonly ["note", "draft", ".data", string, string, string, string, string, string, string, string];
+export declare function getNotesPath(rootPath: string): string;
+export declare function getNormalNotesPath(rootPath: string): string;
+export declare function getDraftNotesPath(rootPath: string): string;
+export declare function getArchiveNotesPath(rootPath: string): string;
+export declare function getInboxPath(rootPath: string): string;
+export declare function getArchivePath(rootPath: string): string;
+export declare function getStateNotesPath(rootPath: string): string;
+export declare function getStatePath(rootPath: string): string;
+export declare function getStateTmpPath(rootPath: string): string;
+export declare function getAiStatePath(rootPath: string): string;
+export declare function getAiPromptsPath(rootPath: string): string;
+export declare function getAiLogsPath(rootPath: string): string;
+export declare function getAiConfigPath(rootPath: string): string;
+export declare function getAiQueuePath(rootPath: string): string;
+export declare function getLegacyStatePath(rootPath: string): string;
+export declare function getInboxNotePath(rootPath: string, key: string): string;
+export declare function getNormalNotePath(rootPath: string, key: string): string;
+export declare function getArchiveNotePath(rootPath: string, key: string): string;
+export declare function ensureManagedRoot(rootPath: string): string;
+//# sourceMappingURL=root-layout.d.ts.map
