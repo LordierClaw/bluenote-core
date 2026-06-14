@@ -1,5 +1,6 @@
 import path from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import MiniSearch from "minisearch";
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
 import initSqlJs from "sql.js";
@@ -11,12 +12,23 @@ import { createSearchDocuments } from "./search-documents.js";
 const SQL_WASM_FILENAME = "sql-wasm.wasm";
 const executableAdjacentSqlWasmPath = path.join(path.dirname(process.execPath), SQL_WASM_FILENAME);
 const projectSqlWasmPath = path.resolve("node_modules", "sql.js", "dist", SQL_WASM_FILENAME);
+let resolvedSqlWasmPath = null;
+try {
+    const require = createRequire(import.meta.url);
+    resolvedSqlWasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
+}
+catch {
+    // ignore
+}
 function locateSqlWasm(fileName) {
     if (fileName !== SQL_WASM_FILENAME) {
         return fileName;
     }
     if (existsSync(executableAdjacentSqlWasmPath)) {
         return executableAdjacentSqlWasmPath;
+    }
+    if (resolvedSqlWasmPath && existsSync(resolvedSqlWasmPath)) {
+        return resolvedSqlWasmPath;
     }
     if (existsSync(projectSqlWasmPath)) {
         return projectSqlWasmPath;
