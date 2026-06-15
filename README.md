@@ -21,7 +21,17 @@ Install `@lordierclaw/bluenote-core` directly only when building a client, distr
 npm install @lordierclaw/bluenote-core
 ```
 
-Until the package is published to npm, consume a local checkout after building it:
+Until the package is published to npm, app/client repositories normally consume a pinned immutable Git commit that includes built output:
+
+```json
+{
+  "dependencies": {
+    "@lordierclaw/bluenote-core": "git+https://github.com/LordierClaw/bluenote-core.git#<pinned-commit-sha>"
+  }
+}
+```
+
+For active local core development, temporarily consume a sibling checkout after building it:
 
 ```json
 {
@@ -37,7 +47,7 @@ npm install
 npm run build
 ```
 
-The repository does not track generated `dist/` artifacts, so direct GitHub branch/tag dependencies are not the recommended consumption path unless that tag intentionally includes built output.
+Release-like Git dependencies must be pinned to immutable commits or tags and include built output. Do not use moving branch dependencies such as `#main` for release-like installs.
 
 For a sibling source checkout, build/check this package before clients or the distribution CLI:
 
@@ -79,7 +89,7 @@ npm test
 npm run check
 ```
 
-`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. `npm test` rebuilds first, then runs the TypeScript test suite with Vitest so child-process tests never use stale generated output. `npm run check` runs typecheck, tests, and package import smoke verification. The generated `dist/` directory is ignored by git and included only in built npm package artifacts.
+`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. `npm test` rebuilds first, then runs the TypeScript test suite with Vitest so child-process tests never use stale generated output. `npm run check` runs typecheck, tests, and package import smoke verification. The generated `dist/` directory is included in npm package artifacts and in pinned Git dependency commits/tags used by sibling packages.
 
 ## Documentation
 
