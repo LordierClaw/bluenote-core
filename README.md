@@ -1,25 +1,71 @@
 # @lordierclaw/bluenote-core
 
-Headless BlueNote core for local-first Markdown notes. This package contains storage, note business logic, search/indexing, configuration, domain helpers, and AI support code used by BlueNote.
+Headless BlueNote core for local-first Markdown notes. This package owns storage, note business logic, search/indexing, configuration, domain helpers, and AI support code used by BlueNote clients.
 
-It intentionally does **not** include terminal UI, OpenTUI rendering, CLI entrypoints, editor integration, clipboard integration, server, sync, or other terminal-client behavior.
+## Role in BlueNote
+
+This repo owns:
+
+- note model and storage layout
+- plain Markdown note files plus sidecar metadata
+- search/index semantics
+- AI configuration, queue, provider, prompt, and description-generation services
+- public core APIs consumed by distribution and client packages
+
+It intentionally does not include terminal UI, browser UI, OpenTUI rendering, CLI presentation, editor integration, clipboard integration, or distribution command routing.
 
 ## Install
 
-Most users should install the BlueNote app entrypoint instead of installing the core library directly:
+Most users should install the BlueNote app entrypoint and optional clients instead of installing core directly:
 
 ```sh
 npm install -g @lordierclaw/bluenote
-npm install -g bluenote-webui   # optional browser UI
-npm install -g bluenote-term    # optional terminal UI
+npm install -g @lordierclaw/bluenote-webui   # optional browser UI
+npm install -g @lordierclaw/bluenote-term    # optional terminal UI
 bluenote doctor
 ```
 
-Install `@lordierclaw/bluenote-core` directly only when building a client, distribution package, or library integration:
+The distribution README is the canonical guide for full app install, uninstall, PATH setup, and optional client verification.
+
+Install core directly only when building a client, distribution package, or library integration:
 
 ```sh
 npm install @lordierclaw/bluenote-core
 ```
+
+## Local development
+
+For sibling source checkout development, build/check core before clients or the distribution CLI:
+
+```sh
+cd ../bluenote-core
+npm ci --include=dev
+npm run check
+```
+
+Sibling packages should consume core through public package exports only:
+
+```ts
+import { createBlueNoteCore, createNote, searchNotes } from "@lordierclaw/bluenote-core"
+```
+
+Do not import `src/*`, `dist/*`, tests, or other private paths. Supported public entrypoints are the package root, `./search/contains-match`, `./api/daemon-contract`, and `./package.json`.
+
+## Scripts
+
+```sh
+npm install
+npm run typecheck
+npm run build
+npm test
+npm run check
+```
+
+`npm test` rebuilds first, then runs the TypeScript test suite with Vitest so child-process tests do not use stale generated output. `npm run check` runs typecheck, tests, and package import smoke verification.
+
+## Packaging and versions
+
+The package name is `@lordierclaw/bluenote-core`.
 
 Until the package is published to npm, app/client repositories normally consume a pinned immutable Git commit that includes built output:
 
@@ -41,68 +87,23 @@ For active local core development, temporarily consume a sibling checkout after 
 }
 ```
 
-```sh
-cd ../bluenote-core
-npm install
-npm run build
-```
-
 Release-like Git dependencies must be pinned to immutable commits or tags and include built output. Do not use moving branch dependencies such as `#main` for release-like installs.
 
-For a sibling source checkout, build/check this package before clients or the distribution CLI:
+## Cross-platform notes
 
-```sh
-cd ../bluenote-core
-npm ci --include=dev
-npm run check
-```
+- Runtime target: Node.js `>=16.14 <17 || >=18`.
+- Package tooling uses npm and TypeScript.
+- Core workflows are local-first and do not require accounts, sync services, hosted backends, or cloud storage.
+- Optional AI provider calls are explicit/queued by clients and should not block normal local note workflows.
 
-## Usage
+## Related packages
 
-Most core APIs are exported from the package root:
+- `@lordierclaw/bluenote`: official distribution CLI and top-level app command.
+- `@lordierclaw/bluenote-webui`: local browser UI client.
+- `@lordierclaw/bluenote-term`: terminal/TUI client.
 
-```ts
-import { createBlueNoteCore, createNote, searchNotes } from "@lordierclaw/bluenote-core"
-```
-
-Public subpath exports are intentionally limited to lightweight helpers and shared contracts:
-
-```ts
-import { containsSearchQuery } from "@lordierclaw/bluenote-core/search/contains-match"
-import { BLUENOTE_DAEMON_API_VERSION } from "@lordierclaw/bluenote-core/api/daemon-contract"
-```
-
-Do not import `src/*`, `dist/*`, tests, or other private paths. Supported public entrypoints are the package root, `./search/contains-match`, `./api/daemon-contract`, and `./package.json`.
-
-## Requirements
-
-- Node.js 16.14 or newer
-- npm
-
-## Commands
-
-```sh
-npm install
-npm run typecheck
-npm run build
-npm test
-npm run check
-```
-
-`npm run build` uses Node.js and TypeScript to emit runnable ESM JavaScript and TypeScript declarations to `dist/`. `npm test` rebuilds first, then runs the TypeScript test suite with Vitest so child-process tests never use stale generated output. `npm run check` runs typecheck, tests, and package import smoke verification. The generated `dist/` directory is included in npm package artifacts and in pinned Git dependency commits/tags used by sibling packages.
-
-## Documentation
-
-The docs folder follows the same top-level organization as BlueNote terminal docs:
+Additional docs:
 
 - [Product overview](docs/product/overview.md)
 - [Runtime and dependencies](docs/architecture/runtime-and-dependencies.md)
-- [Phase 8 core Node 16.14 compatibility](docs/phases/phase-8-core-node-16-14-compat.md)
-- [Node 16.14 compatibility plan](docs/plans/2026-06-11-node-16-14-compat.md)
 - [Package workflow](docs/workflow/package.md)
-
-## Scope and compatibility
-
-This repository preserves the existing public API, storage layout, note file format, search semantics, and AI behavior from the extracted BlueNote core package. It is a standalone library repository, not a redesign of BlueNote and not a UI/client package.
-
-For contribution guidance, see [CONTRIBUTING.md](./CONTRIBUTING.md).
