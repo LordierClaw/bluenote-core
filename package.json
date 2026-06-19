@@ -3,6 +3,10 @@
   "version": "0.4.3",
   "description": "Headless BlueNote core for local-first Markdown notes.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LordierClaw/bluenote-core"
+  },
   "type": "module",
   "packageManager": "npm@8.5.0",
   "main": "./dist/index.js",

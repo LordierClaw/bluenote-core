@@ -55,6 +55,10 @@ describe("package boundary enforcement", () => {
     assert.equal(packageJson.scripts.test.includes("bun"), false)
     assert.equal(packageJson.packageManager.startsWith("npm@"), true)
     assert.equal(packageJson.packageManager.startsWith("bun@"), false)
+    assert.deepEqual(packageJson.repository, {
+      type: "git",
+      url: "https://github.com/LordierClaw/bluenote-core",
+    })
     assert.equal(packageJson.files.includes("CHANGELOG.md"), false)
     assert.deepEqual(Object.keys(packageJson.exports), [".", "./search/contains-match", "./api/daemon-contract", "./package.json"])
     assert.deepEqual(packageJson.exports["./search/contains-match"], {
