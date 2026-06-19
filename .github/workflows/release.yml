@@ -44,7 +44,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
-        run: node -e "const pkg=require('./package.json'); const expected=`v${pkg.version}`; if (process.env.GITHUB_REF_NAME !== expected) { console.error(`tag ${process.env.GITHUB_REF_NAME} does not match ${expected}`); process.exit(1); }"
+        run: node -e 'const pkg=require("./package.json"); const expected=`v${pkg.version}`; if (process.env.GITHUB_REF_NAME !== expected) { console.error(`tag ${process.env.GITHUB_REF_NAME} does not match ${expected}`); process.exit(1); }'
 
       - name: Publish to npm
         if: startsWith(github.ref, 'refs/tags/')
