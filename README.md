@@ -67,7 +67,7 @@ npm run check
 
 The package name is `@lordierclaw/bluenote-core`.
 
-Until the package is published to npm, app/client repositories normally consume a pinned immutable Git commit that includes built output:
+When testing unpublished core changes before an npm release is available, app/client repositories can temporarily consume a pinned immutable Git commit that includes built output:
 
 ```json
 {

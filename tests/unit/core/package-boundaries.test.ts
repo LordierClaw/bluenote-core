@@ -48,7 +48,7 @@ describe("package boundary enforcement", () => {
     const packageJson = JSON.parse(await read("package.json"))
 
     assert.equal(packageJson.name, "@lordierclaw/bluenote-core")
-    assert.equal(packageJson.version, "0.1.0")
+    assert.match(packageJson.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/)
     assert.equal(packageJson.engines.node, ">=16.14 <17 || >=18")
     assert.equal(packageJson.engines.bun, undefined)
     assert.equal(packageJson.devDependencies?.["@types/bun"], undefined)
