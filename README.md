@@ -67,6 +67,8 @@ npm run check
 
 The package name is `@lordierclaw/bluenote-core`.
 
+Maintainer release flow: publish a GitHub Release for the matching `v*` tag. The release workflow verifies the package first and only then publishes to npm.
+
 When testing unpublished core changes before an npm release is available, app/client repositories can temporarily consume a pinned immutable Git commit that includes built output:
 
 ```json
