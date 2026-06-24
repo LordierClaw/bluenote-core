@@ -4,7 +4,15 @@ import os from "node:os"
 import path from "node:path"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 
-import { createBlueNoteCore } from "@lordierclaw/bluenote-core"
+import {
+  createBlueNoteCore,
+  type SyncLinkOptions,
+  type SyncLinkSummary,
+  type SyncNowSummary,
+  type SyncRepairSummary,
+  type SyncStatusView,
+  type SyncUnlinkSummary,
+} from "@lordierclaw/bluenote-core"
 
 describe("@lordierclaw/bluenote-core public API", () => {
   test("exposes a minimal headless façade over notes, search, and rebuild", async () => {
@@ -23,6 +31,11 @@ describe("@lordierclaw/bluenote-core public API", () => {
       assert.equal(typeof core.notes.promoteDraft, "function")
       assert.equal(typeof core.search.search, "function")
       assert.equal(typeof core.rebuild, "function")
+      assert.equal(typeof core.sync.status, "function")
+      assert.equal(typeof core.sync.link, "function")
+      assert.equal(typeof core.sync.unlink, "function")
+      assert.equal(typeof core.sync.now, "function")
+      assert.equal(typeof core.sync.repair, "function")
 
       await mkdir(path.join(rootPath, "note", "projects"), { recursive: true })
       const created = core.notes.create({
@@ -43,5 +56,52 @@ describe("@lordierclaw/bluenote-core public API", () => {
     } finally {
       await rm(rootPath, { recursive: true, force: true })
     }
+  })
+
+  test("exports public sync namespace types from the package root", () => {
+    const linkOptions: SyncLinkOptions = {
+      mode: "seed-empty-server-from-local",
+      serverUrl: "https://sync.example.test",
+    }
+    const status: SyncStatusView = {
+      state: "unlinked",
+      mode: "standalone",
+      activity: "idle",
+      pendingCount: 0,
+      runningCount: 0,
+      failedCount: 0,
+      lastError: null,
+    }
+    const linkSummary: SyncLinkSummary = {
+      state: "linked",
+      mode: "sync-client",
+      workspaceId: "workspace_public_api",
+      serverUrl: linkOptions.serverUrl,
+      dirtyRecordsMarked: 0,
+      foldersMarked: 0,
+      notesMarked: 0,
+    }
+    const unlinkSummary: SyncUnlinkSummary = {
+      state: "unlinked",
+      mode: "standalone",
+      keptLocalNotes: true,
+    }
+    const nowSummary: SyncNowSummary = {
+      status: "not-linked",
+      pushed: 0,
+      pulled: 0,
+    }
+    const repairSummary: SyncRepairSummary = {
+      dryRun: true,
+      changed: false,
+      issuesFound: 0,
+      repairsApplied: 0,
+    }
+
+    assert.equal(status.activity, "idle")
+    assert.equal(linkSummary.serverUrl, "https://sync.example.test")
+    assert.equal(unlinkSummary.keptLocalNotes, true)
+    assert.equal(nowSummary.status, "not-linked")
+    assert.equal(repairSummary.changed, false)
   })
 })

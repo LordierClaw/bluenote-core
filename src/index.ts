@@ -11,6 +11,21 @@ import { promoteDraft, type PromoteDraftOptions, type PromoteDraftSummary } from
 import { searchNotes, type SearchNoteMatch } from "./core/search-notes"
 import { rebuildIndexes, type RebuildIndexesOptions, type RebuildIndexesSummary } from "./core/rebuild-indexes"
 import type { NoteVisibilityOptions } from "./core/note-visibility"
+import {
+  getCoreSyncStatus,
+  linkCoreSync,
+  repairCoreSync,
+  syncCoreNow,
+  unlinkCoreSync,
+  type SyncLinkOptions,
+  type SyncLinkSummary,
+  type SyncNowOptions,
+  type SyncNowSummary,
+  type SyncRepairOptions,
+  type SyncRepairSummary,
+  type SyncStatusView,
+  type SyncUnlinkSummary,
+} from "./sync/core-sync"
 
 export * from "./core/errors"
 export type * from "./core/types"
@@ -66,6 +81,8 @@ export * from "./storage/root-layout"
 export * from "./storage/sidecar-repository"
 export * from "./storage/sidecar-schema"
 export * from "./storage/state-manifest"
+export * from "./sync/core-sync"
+export * from "./sync/types"
 export * from "./sync/dirty-repository"
 export * from "./sync/folder-repository"
 export {
@@ -136,6 +153,13 @@ export interface BlueNoteCore {
   search: {
     search(query: string, options?: SearchOptions): SearchNoteMatch[]
   }
+  sync: {
+    status(options?: BlueNoteCoreRootOptions): SyncStatusView
+    link(options: SyncLinkOptions & BlueNoteCoreRootOptions): SyncLinkSummary
+    unlink(options?: BlueNoteCoreRootOptions): SyncUnlinkSummary
+    now(options?: SyncNowOptions & BlueNoteCoreRootOptions): SyncNowSummary
+    repair(options?: SyncRepairOptions & BlueNoteCoreRootOptions): SyncRepairSummary
+  }
   rebuild(options?: RebuildOptions): RebuildIndexesSummary
 }
 
@@ -191,6 +215,23 @@ export function createBlueNoteCore(config: BlueNoteCoreConfig = {}): BlueNoteCor
     search: {
       search(query, options = {}) {
         return searchNotes(query, withRoot(config, options))
+      },
+    },
+    sync: {
+      status(options = {}) {
+        return getCoreSyncStatus(applyRoot(config, options))
+      },
+      link(options) {
+        return linkCoreSync(withRoot(config, options))
+      },
+      unlink(options = {}) {
+        return unlinkCoreSync(applyRoot(config, options))
+      },
+      now(options = {}) {
+        return syncCoreNow(withRoot(config, options))
+      },
+      repair(options = {}) {
+        return repairCoreSync(withRoot(config, options))
       },
     },
     rebuild(options = {}) {
