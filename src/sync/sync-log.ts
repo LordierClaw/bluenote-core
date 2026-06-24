@@ -49,11 +49,13 @@ const redactedFieldNames = new Set([
   "cookie",
   "credential",
   "credentials",
+  "data",
   "headers",
   "idtoken",
   "notebodies",
   "notebody",
   "password",
+  "payload",
   "rawbody",
   "rawrequest",
   "rawresponse",
@@ -64,6 +66,7 @@ const redactedFieldNames = new Set([
   "responsebody",
   "secret",
   "setcookie",
+  "text",
   "token",
 ])
 

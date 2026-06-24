@@ -104,11 +104,17 @@ describe("sync log", () => {
       noteBody: "Do not leak note body.",
       rawRequest: { url: "https://example.test/?safe=1", payload: "Do not leak payload." },
       rawResponse: { text: "Do not leak text." },
+      payload: "Do not leak direct payload.",
+      text: "Do not leak direct text.",
+      data: "Do not leak direct data.",
       safe: "visible",
     }), {
       noteBody: "[redacted]",
       rawRequest: "[redacted]",
       rawResponse: "[redacted]",
+      payload: "[redacted]",
+      text: "[redacted]",
+      data: "[redacted]",
       safe: "visible",
     })
   })
