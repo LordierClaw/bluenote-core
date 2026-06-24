@@ -2,7 +2,7 @@ import { describe, test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
 import { createBlueNoteCore, createDirtyRecordRepository, type SyncTransport } from "../../../src"
@@ -467,6 +467,52 @@ describe("sync client service", () => {
       assert.equal(readFileSync(note.notePath, "utf8").includes("Original body."), true)
       assert.equal(existsSync(path.join(rootPath, destination)), false)
       assert.equal(core.notes.get(note.key).body, "Original body.\n")
+    })
+  })
+
+  test("pulled relocation rejects symlinked destination parents before writing", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const outsidePath = path.join(rootPath, "outside")
+      mkdirSync(outsidePath, { recursive: true })
+      symlinkSync(outsidePath, path.join(rootPath, "note", "link"), "dir")
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Symlink Source",
+        body: "Safe local body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-symlink-source",
+      })
+      const destination = "note/link/escaped.md"
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Escaped through symlink.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 13,
+          hasMore: false,
+          changes: [{
+            sequence: 13,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Escaped",
+            relativePath: destination,
+            bodyAvailable: true,
+            metadata: { key: "escaped", relativePath: destination, title: "Escaped", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /symlink/i)
+      assert.equal(existsSync(path.join(outsidePath, "escaped.md")), false)
+      assert.equal(readFileSync(note.notePath, "utf8").includes("Safe local body."), true)
+      assert.equal(core.notes.get(note.key).body, "Safe local body.\n")
     })
   })
 

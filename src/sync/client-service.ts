@@ -65,6 +65,38 @@ function normalizeNoteRelativePath(rootPath: string, relativePath: string): stri
   return normalizedRelativePath
 }
 
+function assertExistingPathIsNotSymlink(filePath: string, relativeLabel: string): void {
+  try {
+    if (fs.lstatSync(filePath).isSymbolicLink()) {
+      throw new UsageError(`Pulled note path '${relativeLabel}' must not be a symlink.`, {
+        hint: "Remove symlinks from BlueNote-managed note paths before syncing.",
+      })
+    }
+  } catch (error) {
+    if (error instanceof UsageError) {
+      throw error
+    }
+    if (typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === "ENOENT") {
+      return
+    }
+    throw error
+  }
+}
+
+function assertPathAndParentsAreNotSymlinks(rootPath: string, targetPath: string): void {
+  const normalizedRootPath = path.resolve(rootPath)
+  const normalizedTargetPath = assertPathInsideRoot(normalizedRootPath, targetPath)
+  const relativePath = path.relative(normalizedRootPath, normalizedTargetPath)
+  const parts = relativePath === "" ? [] : relativePath.split(path.sep).filter(Boolean)
+  let currentPath = normalizedRootPath
+
+  assertExistingPathIsNotSymlink(currentPath, path.relative(normalizedRootPath, currentPath) || ".")
+  for (const part of parts) {
+    currentPath = path.join(currentPath, part)
+    assertExistingPathIsNotSymlink(currentPath, path.relative(normalizedRootPath, currentPath))
+  }
+}
+
 function snapshotFile(filePath: string): FileSnapshot {
   if (!fs.existsSync(filePath)) {
     return { filePath, existed: false, content: null }
@@ -72,8 +104,9 @@ function snapshotFile(filePath: string): FileSnapshot {
   return { filePath, existed: true, content: fs.readFileSync(filePath) }
 }
 
-function restoreFileSnapshots(snapshots: FileSnapshot[]): void {
+function restoreFileSnapshots(rootPath: string, snapshots: FileSnapshot[]): void {
   for (const snapshot of [...snapshots].reverse()) {
+    assertPathAndParentsAreNotSymlinks(rootPath, snapshot.filePath)
     if (snapshot.existed) {
       fs.mkdirSync(path.dirname(snapshot.filePath), { recursive: true })
       fs.writeFileSync(snapshot.filePath, snapshot.content ?? Buffer.alloc(0))
@@ -147,6 +180,7 @@ function assertPulledNotePathAvailable(rootPath: string, relativePath: string, n
   }
 
   const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath))
+  assertPathAndParentsAreNotSymlinks(rootPath, notePath)
   if (fs.existsSync(notePath) && owner !== noteId) {
     throw new UsageError(`Pulled note path '${relativePath}' already exists.`, {
       hint: "Rejecting pulled note to avoid overwriting an existing local Markdown file.",
@@ -194,6 +228,8 @@ function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: s
 
   const snapshots = [snapshotFile(notePath), snapshotFile(existingPath), snapshotFile(sidecars.getSidecarPathByNoteId(change.entityId))]
   try {
+    assertPathAndParentsAreNotSymlinks(rootPath, existingPath)
+    assertPathAndParentsAreNotSymlinks(rootPath, sidecars.getSidecarPathByNoteId(change.entityId))
     fs.mkdirSync(path.dirname(notePath), { recursive: true })
     fs.writeFileSync(notePath, serializePlainNote({ sourcePath: relativePath, body }), "utf8")
     if (existingPath !== notePath && fs.existsSync(existingPath)) {
@@ -208,7 +244,7 @@ function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: s
       updatedAt,
     })
   } catch (error) {
-    restoreFileSnapshots(snapshots)
+    restoreFileSnapshots(rootPath, snapshots)
     throw error
   }
 }
