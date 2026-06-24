@@ -71,11 +71,34 @@ export function createSidecarRepository(rootPath) {
         }
         return validateNoteSidecar(parsed, path.join(STATE_NOTES_DIRECTORY, `${identifier}.json`));
     }
+    function readSidecarByKey(key) {
+        if (fs.existsSync(getSidecarPath(key))) {
+            return readSidecar(key);
+        }
+        if (fs.existsSync(normalizedStateNotesPath)) {
+            for (const entry of fs.readdirSync(normalizedStateNotesPath, { withFileTypes: true })) {
+                if (!entry.isFile() || !entry.name.endsWith(".json")) {
+                    continue;
+                }
+                const identifier = path.basename(entry.name, ".json");
+                try {
+                    const sidecar = readSidecar(identifier);
+                    if (sidecar.key === key) {
+                        return sidecar;
+                    }
+                }
+                catch {
+                    // Ignore unrelated malformed sidecars while resolving key-compatible lookups.
+                }
+            }
+        }
+        return readSidecar(key);
+    }
     return {
         getSidecarPath,
         getSidecarPathByNoteId,
         read(key) {
-            return readSidecar(key);
+            return readSidecarByKey(key);
         },
         readByNoteId(noteId) {
             return readSidecar(noteId);

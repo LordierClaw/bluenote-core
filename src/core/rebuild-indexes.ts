@@ -91,6 +91,7 @@ function findSidecarForRebuild(
   sidecars: ReturnType<typeof createSidecarRepository>,
   expectedKey: string,
   expectedRelativePath: string,
+  validationErrors: string[],
 ) {
   const legacySidecarPath = sidecars.getSidecarPath(expectedKey)
 
@@ -99,7 +100,13 @@ function findSidecarForRebuild(
   }
 
   for (const sidecarKey of listSidecarKeys(rootPath)) {
-    const sidecar = sidecars.read(sidecarKey)
+    let sidecar
+    try {
+      sidecar = sidecars.readByNoteId(sidecarKey)
+    } catch (error) {
+      validationErrors.push(...collectErrorMessages(error))
+      continue
+    }
     if (sidecar.key === expectedKey && path.normalize(sidecar.relativePath) === path.normalize(expectedRelativePath)) {
       return sidecar
     }
@@ -158,9 +165,9 @@ export function rebuildIndexes(options: RebuildIndexesOptions = {}): RebuildInde
       continue
     }
 
-    let sidecar = findSidecarForRebuild(rootPath, sidecars, expectedKey, record.relativePath)
-
     try {
+      let sidecar = findSidecarForRebuild(rootPath, sidecars, expectedKey, record.relativePath, validationErrors)
+
       if (sidecar === undefined) {
         const legacyNote = readLegacyFrontmatterNote(rawNote, record.relativePath)
 
