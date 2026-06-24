@@ -553,6 +553,61 @@ test("repository rename preserves noteId-keyed sidecar path", async () => {
   }
 })
 
+test("repository rename restores noteId-keyed sidecar when removing the old note fails", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-note-id-rename-rollback-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
+    const created = repository.create({
+      noteId: "note_rename_rollback_123",
+      frontmatter: { ...FIXED_FRONTMATTER, id: "old-title", title: "Old Title" },
+      body: "Original body.\n",
+      destination: { type: "normal", folderRelativePath: "note/work" },
+    })
+    const sidecarPath = path.join(getStateNotesPath(rootPath), "note_rename_rollback_123.json")
+    const originalSidecar = await readFile(sidecarPath, "utf8")
+    const originalRmSync = fs.rmSync
+    const removeFailure = new Error("simulated old note removal failure")
+    const rmMock = mockMethod(fs, "rmSync", (...args: Parameters<typeof fs.rmSync>) => {
+      const [targetPath] = args
+
+      if (path.resolve(String(targetPath)) === path.resolve(created.notePath)) {
+        throw removeFailure
+      }
+
+      return originalRmSync(...args)
+    })
+
+    try {
+      assert.throws(
+        () =>
+          repository.rename(created.notePath, {
+            nextKey: "new-title",
+            title: "New Title",
+            body: "Renamed body.\n",
+            updatedAt: "2026-06-07T10:00:00.000Z",
+          }),
+        (error) => {
+          assert.ok(error instanceof UsageError)
+          assert.equal(error.cause, removeFailure)
+          return true
+        },
+      )
+    } finally {
+      rmMock.mock.restore()
+    }
+
+    await access(created.notePath)
+    await assert.rejects(access(path.join(rootPath, "note", "work", "new-title.md")))
+    assert.equal(await readFile(sidecarPath, "utf8"), originalSidecar)
+    await assert.rejects(access(path.join(getStateNotesPath(rootPath), "old-title.json")))
+    await assert.rejects(access(path.join(getStateNotesPath(rootPath), "new-title.json")))
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("syncEditedNote preserves the previous note body when the atomic body write fails", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-sync-atomic-failure-"))
 

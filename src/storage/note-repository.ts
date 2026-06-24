@@ -635,7 +635,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
           }
         }
 
-        if (removedPreviousSidecar) {
+        if (removedPreviousSidecar || (wroteNextSidecar && nextSidecarPath === previousSidecarPath)) {
           try {
             sidecars.write(existingSidecar)
           } catch (rollbackError) {
