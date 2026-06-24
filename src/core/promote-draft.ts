@@ -9,6 +9,7 @@ import { parsePlainNote, serializePlainNote } from "../storage/plain-note"
 import { getNormalNotesPath } from "../storage/root-layout"
 import { createSidecarRepository } from "../storage/sidecar-repository"
 import type { NoteSidecar } from "../storage/sidecar-schema"
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 import { selectNote } from "./select-note"
 import { UsageError } from "./errors"
 
@@ -114,6 +115,7 @@ export function promoteDraft(options: PromoteDraftOptions): PromoteDraftSummary 
   const sidecars = createSidecarRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector, visibility: "drafts" })
   const previousKey = selected.frontmatter.id
+  const syncEntityId = getNoteSyncEntityId(rootPath, selected)
   const previousRelativePath = selected.sourcePath
   const previousNotePath = assertPathInsideRoot(rootPath, path.join(rootPath, previousRelativePath))
   const existingSidecar = findSidecarForNote(rootPath, sidecars, previousKey, previousRelativePath)
@@ -212,5 +214,19 @@ export function promoteDraft(options: PromoteDraftOptions): PromoteDraftSummary 
   }
 
   updateLatestOpenedPathIfMatched(rootPath, previousRelativePath, nextRelativePath)
+  recordSyncMutationBestEffort(rootPath, {
+    notes: [{
+      entityId: syncEntityId,
+      markedAt: nextSidecar.updatedAt,
+      metadata: {
+        key: nextKey,
+        previousKey,
+        previousRelativePath,
+        relativePath: nextRelativePath,
+        title,
+      },
+    }],
+    folders: [{ relativePath: destination.relativePath, markedAt: nextSidecar.updatedAt }],
+  })
   return { previousKey, key: nextKey, title, previousRelativePath, relativePath: nextRelativePath, notePath: nextNotePath }
 }

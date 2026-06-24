@@ -6,6 +6,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:f
 
 import { UsageError } from "../../../src/core/errors"
 import { renameNote } from "../../../src/core/rename-note"
+import { enableSyncClientMode, listDirtyRecords } from "./sync-dirty-test-helpers"
 
 async function writePlainNoteWithSidecar(
   rootPath: string,
@@ -283,6 +284,51 @@ test("renameNote leaves a recovery artifact behind when rename staging fails", a
 
     assert.equal(recoveryArtifact.previousKey, "original-note")
     assert.equal(recoveryArtifact.nextKey, "renamed-title-00000a")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("renameNote marks the renamed note dirty in sync-client mode", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-rename-note-sync-dirty-"))
+
+  try {
+    await enableSyncClientMode(rootPath)
+    await writePlainNoteWithSidecar(rootPath, {
+      noteId: "note_rename_dirty",
+      key: "original-note",
+      title: "Original Title",
+      description: "Original description.",
+      relativePath: "note/work/original-note.md",
+      body: "Original body.\n",
+    })
+
+    renameNote({
+      override: rootPath,
+      selector: "original-note",
+      title: "Renamed Title",
+      body: "Renamed body.\n",
+      updatedAt: "2026-05-21T12:45:00.000Z",
+      randomSource: () => 10,
+    })
+
+    assert.deepEqual(listDirtyRecords(rootPath), [
+      {
+        entityType: "note",
+        entityId: "note_rename_dirty",
+        dirtyType: "upsert",
+        markedAt: "2026-05-21T12:45:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: {
+          key: "renamed-title-00000a",
+          previousKey: "original-note",
+          previousRelativePath: "note/work/original-note.md",
+          relativePath: "note/work/renamed-title-00000a.md",
+          title: "Renamed Title",
+        },
+      },
+    ])
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }

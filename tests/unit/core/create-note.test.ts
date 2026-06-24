@@ -8,6 +8,7 @@ import { UsageError } from "../../../src/core/errors"
 import { createNote } from "../../../src/core/create-note"
 import type { Clock } from "../../../src/platform/clock"
 import { getStateNotesPath } from "../../../src/storage/root-layout"
+import { enableSyncClientMode, listDirtyRecords, withTempRoot } from "./sync-dirty-test-helpers"
 
 function fixedClock(isoTimestamp: string): Clock {
   return {
@@ -41,6 +42,75 @@ test("createNote creates an untitled draft with generated draft key and title", 
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }
+})
+
+test("createNote does not create dirty records for standalone schema 3 roots", async () => {
+  await withTempRoot("bluenote-create-note-standalone-dirty-", (rootPath) => {
+    const created = createNote({
+      override: rootPath,
+      type: "draft",
+      title: "Standalone Draft",
+      body: "Standalone body.\n",
+      noteIdGenerator: () => "note_standalone_dirty",
+      randomSource: () => 46655,
+      clock: fixedClock("2026-06-06T12:00:00.000Z"),
+    })
+
+    assert.equal(created.noteId, "note_standalone_dirty")
+    assert.deepEqual(listDirtyRecords(rootPath), [])
+  })
+})
+
+test("createNote marks the new note dirty in explicit sync-client mode", async () => {
+  await withTempRoot("bluenote-create-note-sync-dirty-", async (rootPath) => {
+    await enableSyncClientMode(rootPath)
+
+    const created = createNote({
+      override: rootPath,
+      type: "draft",
+      title: "Synced Draft",
+      body: "Synced body.\n",
+      noteIdGenerator: () => "note_sync_dirty",
+      randomSource: () => 46655,
+      clock: fixedClock("2026-06-06T12:00:00.000Z"),
+    })
+
+    assert.equal(created.noteId, "note_sync_dirty")
+    assert.deepEqual(listDirtyRecords(rootPath), [
+      {
+        entityType: "note",
+        entityId: "note_sync_dirty",
+        dirtyType: "upsert",
+        markedAt: "2026-06-06T12:00:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: {
+          key: "synced-draft-000zzz",
+          relativePath: "draft/synced-draft-000zzz.md",
+          title: "Synced Draft",
+        },
+      },
+    ])
+  })
+})
+
+test("createNote still writes the note if sync dirty bookkeeping is temporarily unavailable", async () => {
+  await withTempRoot("bluenote-create-note-sync-dirty-failure-", async (rootPath) => {
+    await enableSyncClientMode(rootPath)
+    await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
+
+    const created = createNote({
+      override: rootPath,
+      type: "draft",
+      title: "Retry Later",
+      body: "Local write must succeed.\n",
+      noteIdGenerator: () => "note_dirty_retry_later",
+      randomSource: () => 46655,
+      clock: fixedClock("2026-06-06T12:00:00.000Z"),
+    })
+
+    assert.equal(await readFile(created.notePath, "utf8"), "Local write must succeed.\n")
+  })
 })
 
 test("createNote assigns a noteId while preserving the human-readable key and markdown path", async () => {

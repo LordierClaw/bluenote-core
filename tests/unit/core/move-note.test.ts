@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 
 import { SelectorNotFoundError, UsageError } from "../../../src/core/errors"
 import { moveNote } from "../../../src/core/move-note"
+import { enableSyncClientMode, listDirtyRecords } from "./sync-dirty-test-helpers"
 
 async function writeSidecarNote(rootPath: string, input: { key: string; noteId?: string; title: string; relativePath: string; type?: "normal" | "draft" | "archived" }) {
   const notePath = path.join(rootPath, input.relativePath)
@@ -133,6 +134,51 @@ test("moveNote requires an existing destination folder under note", async () => 
       () => moveNote({ override: rootPath, selector: "normal-one", destinationFolder: "note/missing" }),
       (error) => error instanceof UsageError && /existing folder under note/i.test(error.hint ?? ""),
     )
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("moveNote marks the moved note and destination folder dirty in sync-client mode", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-move-note-sync-dirty-"))
+
+  try {
+    await enableSyncClientMode(rootPath)
+    await writeSidecarNote(rootPath, { noteId: "note_move_dirty", key: "roadmap", title: "Roadmap", relativePath: "note/work/roadmap.md" })
+    await mkdir(path.join(rootPath, "note", "projects"), { recursive: true })
+
+    moveNote({
+      override: rootPath,
+      selector: "roadmap",
+      destinationFolder: "note/projects",
+      updatedAt: "2026-06-07T11:00:00.000Z",
+    })
+
+    assert.deepEqual(listDirtyRecords(rootPath), [
+      {
+        entityType: "folder",
+        entityId: "note/projects",
+        dirtyType: "upsert",
+        markedAt: "2026-06-07T11:00:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: { relativePath: "note/projects" },
+      },
+      {
+        entityType: "note",
+        entityId: "note_move_dirty",
+        dirtyType: "upsert",
+        markedAt: "2026-06-07T11:00:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: {
+          key: "roadmap",
+          previousRelativePath: "note/work/roadmap.md",
+          relativePath: "note/projects/roadmap.md",
+          title: "Roadmap",
+        },
+      },
+    ])
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }

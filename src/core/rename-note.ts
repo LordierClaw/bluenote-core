@@ -6,6 +6,7 @@ import { createNoteKey } from "../domain/note-key"
 import { createNoteRepository } from "../storage/note-repository"
 import { selectNote } from "./select-note"
 import { joinPortableRelativePath } from "../platform/path-safety"
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 import { UsageError } from "./errors"
 import type { NoteVisibilityOptions } from "./note-visibility"
 
@@ -53,6 +54,7 @@ export function renameNote(options: RenameNoteOptions): RenameNoteSummary {
   const repository = createNoteRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility })
   const currentKey = selected.frontmatter.id
+  const syncEntityId = getNoteSyncEntityId(rootPath, selected)
 
   let nextKey: string
 
@@ -97,6 +99,20 @@ export function renameNote(options: RenameNoteOptions): RenameNoteSummary {
     }
 
     updateLatestOpenedPathIfMatched(rootPath, renamed.previousRelativePath, renamed.relativePath)
+
+    recordSyncMutationBestEffort(rootPath, {
+      notes: [{
+        entityId: syncEntityId,
+        markedAt: options.updatedAt,
+        metadata: {
+          key: renamed.key,
+          previousKey: renamed.previousKey,
+          previousRelativePath: renamed.previousRelativePath,
+          relativePath: renamed.relativePath,
+          title: options.title,
+        },
+      }],
+    })
 
     return renamed
   } catch (error) {

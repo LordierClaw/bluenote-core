@@ -4,6 +4,7 @@ import { resolveBlueNoteRoot, type ResolveBlueNoteRootOptions } from "../config/
 import { IndexValidationFailedError, UsageError } from "./errors"
 import { createNoteRepository } from "../storage/note-repository"
 import { ensureManagedRoot } from "../storage/root-layout"
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 import { rebuildIndexes } from "./rebuild-indexes"
 import { selectNote } from "./select-note"
 import type { NoteVisibilityOptions } from "./note-visibility"
@@ -29,6 +30,8 @@ export function deleteNote(options: DeleteNoteOptions): DeleteNoteSummary {
   const rootPath = ensureManagedRoot(resolveBlueNoteRoot(options))
   const repository = createNoteRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility })
+  const syncEntityId = getNoteSyncEntityId(rootPath, selected)
+  const deletedAt = selected.frontmatter.updatedAt
   const deleted = repository.delete(path.join(rootPath, selected.sourcePath))
   const rebuildSummary = rebuildIndexes({ override: rootPath })
 
@@ -40,6 +43,25 @@ export function deleteNote(options: DeleteNoteOptions): DeleteNoteSummary {
       },
     )
   }
+
+  recordSyncMutationBestEffort(rootPath, {
+    tombstones: [{
+      entityId: syncEntityId,
+      deletedAt,
+      previousRelativePath: selected.sourcePath,
+      previousTitle: selected.frontmatter.title,
+    }],
+    notes: [{
+      entityId: syncEntityId,
+      dirtyType: "delete",
+      markedAt: deletedAt,
+      metadata: {
+        key: selected.frontmatter.id,
+        previousRelativePath: selected.sourcePath,
+        title: selected.frontmatter.title,
+      },
+    }],
+  })
 
   return {
     rootPath,

@@ -5,6 +5,7 @@ import path from "node:path"
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 
 import { archiveNote } from "../../../src/core/archive-note"
+import { enableSyncClientMode, listDirtyRecords } from "./sync-dirty-test-helpers"
 
 async function writeSidecarNote(rootPath: string, input: { key: string; noteId?: string; title: string; relativePath: string; type?: "normal" | "draft" | "archived" }) {
   const notePath = path.join(rootPath, input.relativePath)
@@ -51,6 +52,41 @@ test("archiveNote preserves noteId-keyed sidecars while marking the note archive
     assert.equal(sidecar.relativePath, ".data/archive/roadmap.md")
     assert.equal(sidecar.archivedAt, "2026-06-07T12:00:00.000Z")
     assert.equal(await readFile(path.join(rootPath, ".data", "archive", "roadmap.md"), "utf8"), "Roadmap body\n")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("archiveNote marks the archived note dirty in sync-client mode", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-archive-note-sync-dirty-"))
+
+  try {
+    await enableSyncClientMode(rootPath)
+    await writeSidecarNote(rootPath, { noteId: "note_archive_dirty", key: "roadmap", title: "Roadmap", relativePath: "note/work/roadmap.md" })
+
+    archiveNote({
+      override: rootPath,
+      selector: "roadmap",
+      clock: { now: () => new Date("2026-06-07T12:00:00.000Z") },
+    })
+
+    assert.deepEqual(listDirtyRecords(rootPath), [
+      {
+        entityType: "note",
+        entityId: "note_archive_dirty",
+        dirtyType: "upsert",
+        markedAt: "2026-06-07T12:00:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: {
+          archivedAt: "2026-06-07T12:00:00.000Z",
+          key: "roadmap",
+          previousRelativePath: "note/work/roadmap.md",
+          relativePath: ".data/archive/roadmap.md",
+          title: "Roadmap",
+        },
+      },
+    ])
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }

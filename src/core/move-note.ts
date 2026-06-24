@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 
 import { resolveBlueNoteRoot, type ResolveBlueNoteRootOptions } from "../config/root"
 import { createNoteRepository } from "../storage/note-repository"
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 import { selectNote } from "./select-note"
 import { UsageError } from "./errors"
 
@@ -37,10 +38,25 @@ export function moveNote(options: MoveNoteOptions): MoveNoteSummary {
   const rootPath = resolveBlueNoteRoot(options)
   const repository = createNoteRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector })
+  const syncEntityId = getNoteSyncEntityId(rootPath, selected)
+  const markedAt = options.updatedAt ?? new Date().toISOString()
 
   try {
-    const moved = repository.moveNote(path.join(rootPath, selected.sourcePath), options.destinationFolder, options.updatedAt ?? new Date().toISOString())
+    const moved = repository.moveNote(path.join(rootPath, selected.sourcePath), options.destinationFolder, markedAt)
     updateLatestOpenedPathIfMatched(rootPath, moved.previousRelativePath, moved.relativePath)
+    recordSyncMutationBestEffort(rootPath, {
+      notes: [{
+        entityId: syncEntityId,
+        markedAt,
+        metadata: {
+          key: moved.key,
+          previousRelativePath: moved.previousRelativePath,
+          relativePath: moved.relativePath,
+          title: selected.frontmatter.title,
+        },
+      }],
+      folders: [{ relativePath: options.destinationFolder, markedAt }],
+    })
     return {
       ...moved,
       title: selected.frontmatter.title,

@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 
 import { UsageError } from "../../../src/core/errors"
 import { promoteDraft } from "../../../src/core/promote-draft"
+import { enableSyncClientMode, listDirtyRecords } from "./sync-dirty-test-helpers"
 
 type MockedMethod<T, K extends keyof T> = { mock: { restore(): void } }
 
@@ -272,6 +273,54 @@ test("promoteDraft refuses to reuse the original draft key for the promoted norm
     assert.equal(sidecar.type, "draft")
     assert.equal(sidecar.relativePath, "draft/draft-000000.md")
     assert.equal(await readFile(path.join(rootPath, "draft", "draft-000000.md"), "utf8"), "Draft 000000 body\n")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("promoteDraft marks the promoted note and destination folder dirty in sync-client mode", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-sync-dirty-"))
+
+  try {
+    await enableSyncClientMode(rootPath)
+    await writeSidecarNote(rootPath, { noteId: "note_promote_dirty", key: "draft-abc123", title: "Draft ABC", relativePath: "draft/draft-abc123.md", type: "draft" })
+    await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
+
+    promoteDraft({
+      override: rootPath,
+      selector: "draft-abc123",
+      destinationFolder: "note/work",
+      title: "Promoted Draft",
+      updatedAt: "2026-06-07T00:00:00.000Z",
+      randomSource: () => 0,
+    })
+
+    assert.deepEqual(listDirtyRecords(rootPath), [
+      {
+        entityType: "folder",
+        entityId: "note/work",
+        dirtyType: "upsert",
+        markedAt: "2026-06-07T00:00:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: { relativePath: "note/work" },
+      },
+      {
+        entityType: "note",
+        entityId: "note_promote_dirty",
+        dirtyType: "upsert",
+        markedAt: "2026-06-07T00:00:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: {
+          key: "promoted-draft-000000",
+          previousKey: "draft-abc123",
+          previousRelativePath: "draft/draft-abc123.md",
+          relativePath: "note/work/promoted-draft-000000.md",
+          title: "Promoted Draft",
+        },
+      },
+    ])
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }

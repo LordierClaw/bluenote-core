@@ -4,6 +4,7 @@ import { joinPortableRelativePath } from "../platform/path-safety"
 import { systemClock, type Clock } from "../platform/clock"
 import { createNoteRepository } from "../storage/note-repository"
 import type { ParsedNote } from "../storage/note-schema"
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 import { ensureManagedRoot } from "../storage/root-layout"
 import { rebuildIndexes } from "./rebuild-indexes"
 import { selectNote } from "./select-note"
@@ -38,6 +39,7 @@ export function archiveNote(options: ArchiveNoteOptions): ArchiveNoteSummary {
   const rootPath = ensureManagedRoot(resolveBlueNoteRoot(options))
   const repository = createNoteRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility ?? "normal" })
+  const syncEntityId = getNoteSyncEntityId(rootPath, selected)
 
   if (isArchivedNote(selected)) {
     throw new UsageError(`Note '${selected.sourcePath}' is already archived.`, {
@@ -65,6 +67,20 @@ export function archiveNote(options: ArchiveNoteOptions): ArchiveNoteSummary {
   if (rebuildSummary.validationErrors.length > 0) {
     throwArchiveValidationError("after", selected.sourcePath, rebuildSummary.validationErrors)
   }
+
+  recordSyncMutationBestEffort(rootPath, {
+    notes: [{
+      entityId: syncEntityId,
+      markedAt: archivedAt,
+      metadata: {
+        archivedAt,
+        key: selected.frontmatter.id,
+        previousRelativePath: selected.sourcePath,
+        relativePath: archived.relativePath,
+        title: selected.frontmatter.title,
+      },
+    }],
+  })
 
   return {
     rootPath,

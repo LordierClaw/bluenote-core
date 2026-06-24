@@ -12,6 +12,7 @@ import { createNoteId } from "../platform/ids"
 import { createNoteRepository } from "../storage/note-repository"
 import { ensureManagedRoot, getStateNotesPath } from "../storage/root-layout"
 import { createSidecarRepository } from "../storage/sidecar-repository"
+import { recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 
 const STORAGE_SAFE_NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 
@@ -166,6 +167,15 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
       clock,
     })
   }
+
+  recordSyncMutationBestEffort(rootPath, {
+    notes: [{
+      entityId: noteId,
+      markedAt: timestamp,
+      metadata: { key, relativePath: created.relativePath, title },
+    }],
+    folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
+  })
 
   return {
     noteId,
