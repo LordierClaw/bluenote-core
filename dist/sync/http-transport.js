@@ -36,7 +36,7 @@ function logUrlWithBaseSecrets(baseUrl, requestUrl) {
 function sanitizedFetchCause(error) {
     if (error instanceof Error) {
         const sanitized = new Error(redactSyncHttpUrl(error.message));
-        sanitized.name = error.name;
+        sanitized.name = redactSyncHttpUrl(error.name);
         return sanitized;
     }
     return new Error(redactSyncHttpUrl(String(error)));

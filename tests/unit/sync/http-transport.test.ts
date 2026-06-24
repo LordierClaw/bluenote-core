@@ -229,7 +229,9 @@ describe("sync HTTP transport", () => {
 
   test("redacts credentials when the fetch implementation throws", async () => {
     const fetch: SyncHttpFetch = async (input) => {
-      throw new Error(`request to ${input.toString()} failed with raw network error`)
+      const error = new Error(`request to ${input.toString()} failed with raw network error`)
+      error.name = "FetchError https://user:pass@example.invalid/sync?token=abc"
+      throw error
     }
     const transport = createSyncHttpTransport({ baseUrl: "https://user:pass@example.invalid/sync?token=abc", fetch })
 
@@ -243,6 +245,10 @@ describe("sync HTTP transport", () => {
         assert(error.cause instanceof Error)
         assert.equal(error.cause.message.includes("user:pass"), false)
         assert.equal(error.cause.message.includes("token=abc"), false)
+        assert.equal(error.cause.name.includes("user:pass"), false)
+        assert.equal(error.cause.name.includes("token=abc"), false)
+        assert.equal(String(error.cause).includes("user:pass"), false)
+        assert.equal(String(error.cause).includes("token=abc"), false)
         return true
       },
     )
