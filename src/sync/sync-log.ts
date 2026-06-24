@@ -99,6 +99,16 @@ function redactParams(rawValue: string): { value: string; changed: boolean } {
     if (isRedactedQueryKey(key)) {
       params.set(key, redacted)
       changed = true
+      continue
+    }
+    const values = params.getAll(key)
+    for (const value of values) {
+      const redactedNested = redactString(value)
+      if (redactedNested !== value) {
+        params.set(key, redactedNested)
+        changed = true
+        break
+      }
     }
   }
   return { value: changed ? params.toString() : rawValue, changed }
@@ -107,30 +117,14 @@ function redactParams(rawValue: string): { value: string; changed: boolean } {
 function redactUrl(rawValue: string): string | undefined {
   try {
     const parsed = new URL(rawValue)
-    const query = new URLSearchParams(parsed.search)
-    for (const key of [...query.keys()]) {
-      if (isRedactedQueryKey(key)) {
-        query.set(key, redacted)
-      }
-    }
+    const query = redactParams(parsed.search.startsWith("?") ? parsed.search.slice(1) : parsed.search)
 
     const fragment = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash
-    const fragmentQuery = new URLSearchParams(fragment)
-    let redactedFragment = fragment
-    if (fragment !== "") {
-      let changed = false
-      for (const key of [...fragmentQuery.keys()]) {
-        if (isRedactedQueryKey(key)) {
-          fragmentQuery.set(key, redacted)
-          changed = true
-        }
-      }
-      redactedFragment = changed ? fragmentQuery.toString() : fragment
-    }
+    const fragmentParams = redactParams(fragment)
+    const redactedFragment = fragmentParams.changed ? fragmentParams.value : fragment
 
     const userInfo = parsed.username !== "" || parsed.password !== "" ? `${redacted}@` : ""
-    const search = query.toString()
-    return `${parsed.protocol}//${userInfo}${parsed.host}${parsed.pathname}${search === "" ? "" : `?${search}`}${redactedFragment === "" ? "" : `#${redactedFragment}`}`
+    return `${parsed.protocol}//${userInfo}${parsed.host}${parsed.pathname}${query.value === "" ? "" : `?${query.value}`}${redactedFragment === "" ? "" : `#${redactedFragment}`}`
   } catch {
     return undefined
   }
@@ -166,8 +160,14 @@ function redactString(value: string): string {
     const params = redactParams(rawParams)
     return params.changed ? `${prefix}${params.value}` : match
   })
+  const withEmbeddedAssignments = withEmbeddedBareParams.replace(/(^|\s)([^\s"'<>?#=&]+)=([^\s"'<>?#&]+)/gu, (match, prefix: string, key: string, rawValue: string) => {
+    if (!isRedactedQueryKey(key)) {
+      return match
+    }
+    return `${prefix}${key}=${encodeURIComponent(redacted)}`
+  })
 
-  return withEmbeddedBareParams
+  return withEmbeddedAssignments
     .replace(/\/\/[^/@\s]+@/gu, `//${redacted}@`)
     .replace(/([?&](?:access_token|api_key|apikey|auth|authorization|client_secret|code|id_token|key|password|refresh_token|secret|token)=)[^&#\s]+/giu, `$1${redacted}`)
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/giu, `Bearer ${redacted}`)
