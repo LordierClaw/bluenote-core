@@ -1,11 +1,26 @@
 import { test } from "vitest"
 import assert from "node:assert/strict"
+import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 
 import { UsageError } from "../../../src/core/errors"
 import { promoteDraft } from "../../../src/core/promote-draft"
+
+type MockedMethod<T, K extends keyof T> = { mock: { restore(): void } }
+
+function mockMethod<T extends object, K extends keyof T>(object: T, method: K, implementation: T[K]): MockedMethod<T, K> {
+  const original = object[method]
+  object[method] = implementation
+  return {
+    mock: {
+      restore() {
+        object[method] = original
+      },
+    },
+  }
+}
 
 async function writeSidecarNote(rootPath: string, input: { key: string; noteId?: string; title: string; relativePath: string; type?: "normal" | "draft" | "archived" }) {
   const notePath = path.join(rootPath, input.relativePath)
@@ -59,6 +74,60 @@ test("promoteDraft preserves noteId-keyed sidecars while promoting mutable metad
     assert.equal(sidecar.title, "Promoted Draft")
     assert.equal(sidecar.relativePath, "note/work/promoted-draft-000000.md")
     assert.equal(sidecar.archivedAt, null)
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("promoteDraft restores noteId-keyed sidecar when removing the draft fails", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-note-id-rollback-"))
+  const noteId = "note_promote_rollback_123"
+
+  try {
+    await writeSidecarNote(rootPath, { noteId, key: "draft-abc123", title: "Draft ABC", relativePath: "draft/draft-abc123.md", type: "draft" })
+    await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
+    const previousNotePath = path.join(rootPath, "draft", "draft-abc123.md")
+    const nextNotePath = path.join(rootPath, "note", "work", "promoted-draft-000000.md")
+    const sidecarPath = path.join(rootPath, ".data", "notes", `${noteId}.json`)
+    const originalSidecar = await readFile(sidecarPath, "utf8")
+    const originalRmSync = fs.rmSync
+    const removeFailure = new Error("simulated draft removal failure")
+    const rmMock = mockMethod(fs, "rmSync", (...args: Parameters<typeof fs.rmSync>) => {
+      const [targetPath] = args
+
+      if (path.resolve(String(targetPath)) === path.resolve(previousNotePath)) {
+        throw removeFailure
+      }
+
+      return originalRmSync(...args)
+    })
+
+    try {
+      assert.throws(
+        () =>
+          promoteDraft({
+            override: rootPath,
+            selector: "draft-abc123",
+            destinationFolder: "note/work",
+            title: "Promoted Draft",
+            updatedAt: "2026-06-07T00:00:00.000Z",
+            randomSource: () => 0,
+          }),
+        (error) => {
+          assert.ok(error instanceof UsageError)
+          assert.equal(error.cause, removeFailure)
+          return true
+        },
+      )
+    } finally {
+      rmMock.mock.restore()
+    }
+
+    assert.equal(await readFile(previousNotePath, "utf8"), "Draft ABC body\n")
+    await assert.rejects(readFile(nextNotePath, "utf8"))
+    assert.equal(await readFile(sidecarPath, "utf8"), originalSidecar)
+    await assert.rejects(readFile(path.join(rootPath, ".data", "notes", "draft-abc123.json"), "utf8"))
+    await assert.rejects(readFile(path.join(rootPath, ".data", "notes", "promoted-draft-000000.json"), "utf8"))
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }
