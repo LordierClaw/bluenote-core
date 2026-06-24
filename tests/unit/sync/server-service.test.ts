@@ -9,7 +9,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import initSqlJs from "sql.js"
 
 import { createSyncServerService } from "../../../src/sync/server-service"
-import { createSidecarRepository, createTombstoneRepository, ensureSyncDatabase, UsageError } from "../../../src"
+import { createFolderRepository, createSidecarRepository, createTombstoneRepository, ensureSyncDatabase, UsageError } from "../../../src"
 
 const workspaceId = "workspace-server"
 const dbIdentity = { role: "server" as const, workspaceId }
@@ -129,6 +129,80 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
       contentHash: "sha256:client-body",
       byteLength: 29,
     })
+  })
+})
+
+test("server accepts folder dirty records so client folder queues can drain", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      records: [
+        {
+          entityType: "folder",
+          entityId: "note/projects",
+          dirtyType: "folder-upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: { relativePath: "note/projects" },
+        },
+        {
+          entityType: "folder",
+          entityId: "note/old-projects",
+          dirtyType: "folder-delete",
+          clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+          metadata: { relativePath: "note/old-projects" },
+        },
+      ],
+    })
+
+    assert.deepEqual(response.accepted, [
+      { entityType: "folder", entityId: "note/projects", serverRevision: 1 },
+      { entityType: "folder", entityId: "note/old-projects", serverRevision: 1 },
+    ])
+    assert.equal(response.rejected.length, 0)
+    assert.deepEqual(createFolderRepository(rootPath, dbIdentity).listFolders(), [
+      {
+        relativePath: "note/old-projects",
+        createdAt: "2026-01-01T00:01:00.000Z",
+        updatedAt: "2026-01-01T00:01:00.000Z",
+        deletedAt: "2026-01-01T00:01:00.000Z",
+      },
+      {
+        relativePath: "note/projects",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        deletedAt: null,
+      },
+    ])
+    assert.equal(existsSync(path.join(rootPath, "note", "projects")), true)
+    assert.deepEqual(server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 }).changes.map((change) => ({
+      entityType: change.entityType,
+      entityId: change.entityId,
+      changeType: change.changeType,
+      relativePath: change.relativePath,
+      bodyAvailable: change.bodyAvailable,
+      metadata: change.metadata,
+    })), [
+      {
+        entityType: "folder",
+        entityId: "note/projects",
+        changeType: "folder-upsert",
+        relativePath: "note/projects",
+        bodyAvailable: false,
+        metadata: { relativePath: "note/projects" },
+      },
+      {
+        entityType: "folder",
+        entityId: "note/old-projects",
+        changeType: "folder-delete",
+        relativePath: "note/old-projects",
+        bodyAvailable: false,
+        metadata: { relativePath: "note/old-projects", deletedAt: "2026-01-01T00:01:00.000Z" },
+      },
+    ])
   })
 })
 

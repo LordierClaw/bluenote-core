@@ -117,6 +117,65 @@ describe("sync client service", () => {
     })
   })
 
+  test("archiving a synced note pushes a delete tombstone instead of an archived upsert", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Archive Dirty",
+        body: "Archive me remotely.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-archive-dirty",
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+
+      core.notes.archive(note.key, { clock: { now: () => new Date("2026-06-24T02:00:00.000Z") } })
+      assert.deepEqual(dirty.listDirtyRecords().map((record) => ({
+        entityType: record.entityType,
+        entityId: record.entityId,
+        dirtyType: record.dirtyType,
+        metadata: record.metadata,
+      })), [
+        {
+          entityType: "note",
+          entityId: note.noteId,
+          dirtyType: "delete",
+          metadata: {
+            archivedAt: "2026-06-24T02:00:00.000Z",
+            key: note.key,
+            previousRelativePath: note.relativePath,
+            title: note.title,
+          },
+        },
+      ])
+
+      const transport = makeTransport()
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 1, pulled: 0 })
+      assert.equal(transport.pushes.length, 1)
+      assert.equal(transport.pushes[0].records.length, 1)
+      assert.deepEqual(transport.pushes[0].records[0], {
+        entityType: "note",
+        entityId: note.noteId,
+        dirtyType: "delete",
+        clientUpdatedAt: "2026-06-24T02:00:00.000Z",
+        metadata: {
+          archivedAt: "2026-06-24T02:00:00.000Z",
+          key: note.key,
+          previousRelativePath: note.relativePath,
+          title: note.title,
+        },
+      })
+      assert.equal(transport.pushes[0].noteBodies, undefined)
+      assert.deepEqual(dirty.listDirtyRecords(), [])
+    })
+  })
+
   test("newer pulled server note replaces a locally dirty note without pushing or preserving conflict files", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

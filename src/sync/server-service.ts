@@ -119,6 +119,25 @@ function normalizeRelativePath(relativePath: string, rootPath: string): string {
   return toRootRelativePath(rootPath, absolutePath)
 }
 
+function normalizeFolderRelativePath(relativePath: string, rootPath: string): string {
+  const portableRelativePath = relativePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/u, "")
+  if (portableRelativePath !== "note" && !portableRelativePath.startsWith("note/")) {
+    throw new UsageError(`Invalid sync folder relativePath '${relativePath}'.`, {
+      hint: "Folder sync pushes must target folders under note/.",
+    })
+  }
+  if (portableRelativePath.endsWith(".md")) {
+    throw new UsageError(`Invalid sync folder relativePath '${relativePath}'.`, {
+      hint: "Folder sync pushes must target directories, not Markdown note files.",
+    })
+  }
+
+  const absolutePath = assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath))
+  const normalNotesPath = getNormalNotesPath(rootPath)
+  assertPathInsideRoot(normalNotesPath, absolutePath)
+  return toRootRelativePath(rootPath, absolutePath)
+}
+
 function metadataWithoutBody(metadata: Record<string, unknown>): Record<string, unknown> {
   const clean: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(metadata)) {
@@ -375,6 +394,52 @@ function deleteNote(rootPath: string, record: SyncPushRecord): MutationResult<{ 
   }
 }
 
+function applyFolderPush(
+  rootPath: string,
+  handle: SyncDatabaseHandle,
+  record: SyncPushRecord,
+): MutationResult<{ relativePath: string; deletedAt: string | null; metadata: Record<string, unknown> }> {
+  const relativePath = normalizeFolderRelativePath(stringMetadata(record.metadata, "relativePath") ?? record.entityId, rootPath)
+  const deletedAt = record.dirtyType === "folder-delete" ? record.clientUpdatedAt : null
+  const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath))
+  const existed = fs.existsSync(folderPath)
+
+  if (record.dirtyType === "folder-upsert") {
+    fs.mkdirSync(folderPath, { recursive: true })
+  }
+
+  handle.db.run(
+    `
+      INSERT INTO folders (relativePath, createdAt, updatedAt, deletedAt)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(relativePath) DO UPDATE SET
+        updatedAt = excluded.updatedAt,
+        deletedAt = excluded.deletedAt
+    `,
+    [relativePath, record.clientUpdatedAt, record.clientUpdatedAt, deletedAt],
+  )
+
+  return {
+    value: {
+      relativePath,
+      deletedAt,
+      metadata: {
+        relativePath,
+        ...(deletedAt === null ? {} : { deletedAt }),
+      },
+    },
+    rollback() {
+      if (!existed && record.dirtyType === "folder-upsert") {
+        try {
+          fs.rmdirSync(folderPath)
+        } catch {
+          // Best-effort rollback: preserve original sync error.
+        }
+      }
+    },
+  }
+}
+
 function latestServerRevision(handle: SyncDatabaseHandle, entityType: string, entityId: string): number {
   const rows = handle.db.exec(
     "SELECT MAX(serverRevision) FROM server_changes WHERE entityType = ? AND entityId = ?",
@@ -558,6 +623,22 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
                   relativePath: deletion.relativePath,
                   bodyAvailable: false,
                   metadata: deletion.metadata,
+                }
+              } else if (record.entityType === "folder" && (record.dirtyType === "folder-upsert" || record.dirtyType === "folder-delete")) {
+                const folderMutation = applyFolderPush(rootPath, handle, record)
+                rollbackRecord = folderMutation.rollback
+                const folder = folderMutation.value
+                appliedChange = {
+                  entityType: "folder",
+                  entityId: folder.relativePath,
+                  changeType: record.dirtyType,
+                  serverRevision: 0,
+                  changedAt,
+                  sourceReplicaId: request.replicaId,
+                  title: null,
+                  relativePath: folder.relativePath,
+                  bodyAvailable: false,
+                  metadata: folder.metadata,
                 }
               } else {
                 throw new UsageError(`Unsupported sync push record '${record.entityType}:${record.dirtyType}'.`, {

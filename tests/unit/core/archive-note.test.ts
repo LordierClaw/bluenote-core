@@ -74,7 +74,7 @@ test("archiveNote marks the archived note dirty in sync-client mode", async () =
       {
         entityType: "note",
         entityId: "note_archive_dirty",
-        dirtyType: "upsert",
+        dirtyType: "delete",
         markedAt: "2026-06-07T12:00:00.000Z",
         attempts: 0,
         lastError: null,
@@ -82,7 +82,6 @@ test("archiveNote marks the archived note dirty in sync-client mode", async () =
           archivedAt: "2026-06-07T12:00:00.000Z",
           key: "roadmap",
           previousRelativePath: "note/work/roadmap.md",
-          relativePath: ".data/archive/roadmap.md",
           title: "Roadmap",
         },
       },
