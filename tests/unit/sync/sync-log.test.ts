@@ -86,6 +86,12 @@ describe("sync log", () => {
       credentials: "[redacted]",
       safe: "visible",
     })
+
+    assert.deepEqual(redactSyncLogValue({ clientCredentials: "client-secret", oauthCredential: "oauth-secret", safe: "visible" }), {
+      clientCredentials: "[redacted]",
+      oauthCredential: "[redacted]",
+      safe: "visible",
+    })
   })
 
   test("redacts fragment tokens and non-obvious raw body fields", () => {
@@ -104,6 +110,18 @@ describe("sync log", () => {
       rawRequest: "[redacted]",
       rawResponse: "[redacted]",
       safe: "visible",
+    })
+  })
+
+  test("redacts credential query variants embedded in strings and errors", () => {
+    assert.equal(
+      redactSyncLogValue("failed fetching https://sync.example.test/path?accessToken=abc&safe=value"),
+      "failed fetching https://sync.example.test/path?accessToken=%5Bredacted%5D&safe=value",
+    )
+
+    assert.deepEqual(redactSyncLogValue(new Error("failed fetching https://sync.example.test/path?accessToken=abc&safe=value")), {
+      name: "Error",
+      message: "failed fetching https://sync.example.test/path?accessToken=%5Bredacted%5D&safe=value",
     })
   })
 
