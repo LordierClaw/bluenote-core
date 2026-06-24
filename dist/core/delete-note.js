@@ -19,12 +19,6 @@ export function deleteNote(options) {
     const syncEntityId = getNoteSyncEntityId(rootPath, selected);
     const deletedAt = (options.clock ?? systemClock).now().toISOString();
     const deleted = repository.delete(path.join(rootPath, selected.sourcePath));
-    const rebuildSummary = rebuildIndexes({ override: rootPath });
-    if (rebuildSummary.validationErrors.length > 0) {
-        throw new IndexValidationFailedError([`Deleted note '${selected.frontmatter.id}', but derived indexes could not be rebuilt.`, ...rebuildSummary.validationErrors].join("\n"), {
-            hint: "Run bn rebuild after fixing the reported validation errors.",
-        });
-    }
     recordSyncMutationBestEffort(rootPath, {
         tombstones: [{
                 entityId: syncEntityId,
@@ -43,6 +37,12 @@ export function deleteNote(options) {
                 },
             }],
     });
+    const rebuildSummary = rebuildIndexes({ override: rootPath });
+    if (rebuildSummary.validationErrors.length > 0) {
+        throw new IndexValidationFailedError([`Deleted note '${selected.frontmatter.id}', but derived indexes could not be rebuilt.`, ...rebuildSummary.validationErrors].join("\n"), {
+            hint: "Run bn rebuild after fixing the reported validation errors.",
+        });
+    }
     return {
         rootPath,
         notePath: deleted.notePath,

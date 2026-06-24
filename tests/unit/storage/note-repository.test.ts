@@ -110,6 +110,27 @@ test("repository list reads typed normal sidecars produced by create", async () 
   }
 })
 
+test("repository read ignores unrelated malformed sidecars when noteId sidecar lookup scans", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-bad-unrelated-sidecar-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    const created = repository.create({
+      noteId: "note_valid_sidecar_scan",
+      frontmatter: FIXED_FRONTMATTER,
+      body: "Readable body.\n",
+    })
+    await writeFile(path.join(getStateNotesPath(rootPath), "aaa_bad_unrelated.json"), "{ not valid json", "utf8")
+
+    const loaded = repository.read(created.notePath)
+
+    assert.deepEqual(loaded.frontmatter, FIXED_FRONTMATTER)
+    assert.equal(loaded.body, "Readable body.\n")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("repository creates a draft note under draft with a typed sidecar", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-draft-"))
 

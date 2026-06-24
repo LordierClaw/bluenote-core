@@ -241,7 +241,16 @@ function findSidecarForNote(rootPath, sidecars, key, relativePath) {
         return sidecars.read(key);
     }
     for (const sidecarKey of listSidecarKeys(rootPath)) {
-        const sidecar = sidecars.read(sidecarKey);
+        let sidecar;
+        try {
+            sidecar = sidecars.read(sidecarKey);
+        }
+        catch (error) {
+            if (sidecarKey === key) {
+                throw error;
+            }
+            continue;
+        }
         if (sidecar.key === key && path.normalize(sidecar.relativePath) === path.normalize(relativePath)) {
             return sidecar;
         }
