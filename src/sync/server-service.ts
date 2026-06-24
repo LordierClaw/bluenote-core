@@ -323,6 +323,9 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Mut
           body,
           updatedAt: metadata.updatedAt,
         })
+        if (ai !== undefined) {
+          sidecars.write({ ...sidecars.readByNoteId(record.entityId), ai })
+        }
       }
     }
   } catch (error) {

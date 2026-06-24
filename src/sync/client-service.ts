@@ -233,6 +233,9 @@ function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: s
   const existingPath = assertPathInsideRoot(rootPath, path.join(rootPath, existingSidecar.relativePath))
   if (existingSidecar.relativePath === relativePath && existingSidecar.key === key) {
     notes.syncEditedNote(existingPath, { title, body, updatedAt })
+    if (ai !== undefined) {
+      sidecars.write({ ...sidecars.readByNoteId(change.entityId), ai })
+    }
     return
   }
 

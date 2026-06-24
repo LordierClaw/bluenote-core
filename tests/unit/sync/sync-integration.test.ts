@@ -7,6 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 
 import {
   createBlueNoteCore,
+  createDirtyRecordRepository,
   createSidecarRepository,
   createSyncServerService,
   ensureSyncDatabase,
@@ -85,6 +86,20 @@ test("core sync moves a note from client A to server to client B and propagates 
     assert.equal(clientBSidecar.noteId, created.noteId)
     assert.equal(clientBSidecar.relativePath, created.relativePath)
     assert.deepEqual(clientBSidecar.ai, { description: { lastProcessedAt: "2026-06-24T00:00:00.000Z" } })
+
+    clientASidecars.write({
+      ...clientASidecars.readByNoteId(created.noteId),
+      ai: { description: { lastProcessedAt: "2026-06-24T00:02:00.000Z" } },
+    })
+    createDirtyRecordRepository(clientARoot, { role: "client", workspaceId }).markDirty({
+      entityType: "note",
+      entityId: created.noteId,
+      dirtyType: "upsert",
+      markedAt: "2026-06-24T00:02:00.000Z",
+    })
+    assert.deepEqual(clientA.sync.now({ transport, replicaId: "client-a" }), { status: "synced", pushed: 1, pulled: 0 })
+    assert.deepEqual(clientB.sync.now({ transport, replicaId: "client-b" }), { status: "synced", pushed: 0, pulled: 1 })
+    assert.deepEqual(createSidecarRepository(clientBRoot).readByNoteId(created.noteId).ai, { description: { lastProcessedAt: "2026-06-24T00:02:00.000Z" } })
 
     clientA.notes.delete(created.key, { force: true, clock: { now: () => new Date("2026-06-24T00:01:00.000Z") } })
     assert.deepEqual(clientA.sync.now({ transport, replicaId: "client-a" }), { status: "synced", pushed: 1, pulled: 0 })
