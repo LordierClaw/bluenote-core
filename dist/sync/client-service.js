@@ -2,16 +2,22 @@ import path from "node:path";
 import fs from "node:fs";
 import { createNoteDescription } from "../domain/note-description.js";
 import { UsageError } from "../core/errors.js";
+import { rebuildIndexes } from "../core/rebuild-indexes.js";
 import { assertPathInsideRoot, toRootRelativePath } from "../platform/path-safety.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { serializePlainNote } from "../storage/plain-note.js";
 import { getStateNotesPath } from "../storage/root-layout.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
+import { createFolderRepository } from "./folder-repository.js";
 import { withSyncDatabase } from "./sync-db.js";
 function metadataString(metadata, key) {
     const value = metadata?.[key];
     return typeof value === "string" ? value : null;
+}
+function metadataObject(metadata, key) {
+    const value = metadata?.[key];
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
 }
 function basenameKey(relativePath) {
     return path.posix.basename(relativePath, ".md");
@@ -154,6 +160,7 @@ function applyPulledNoteUpsert(rootPath, change, body) {
     const title = metadataString(change.metadata, "title") ?? change.title ?? key;
     const updatedAt = metadataString(change.metadata, "updatedAt") ?? change.changedAt;
     const createdAt = metadataString(change.metadata, "createdAt") ?? updatedAt;
+    const ai = metadataObject(change.metadata, "ai");
     const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
     if (existingSidecar === null) {
         fs.mkdirSync(path.dirname(notePath), { recursive: true });
@@ -171,11 +178,24 @@ function applyPulledNoteUpsert(rootPath, change, body) {
             },
             destination: { type: "normal", folderRelativePath: path.posix.dirname(relativePath) },
         });
+        if (ai !== undefined) {
+            sidecars.write({ ...sidecars.readByNoteId(change.entityId), ai });
+        }
         return;
     }
     const existingPath = assertPathInsideRoot(rootPath, path.join(rootPath, existingSidecar.relativePath));
     if (existingSidecar.relativePath === relativePath && existingSidecar.key === key) {
-        notes.syncEditedNote(existingPath, { title, body, updatedAt });
+        const snapshots = [snapshotFile(existingPath), snapshotFile(sidecars.getSidecarPathByNoteId(change.entityId))];
+        try {
+            notes.syncEditedNote(existingPath, { title, body, updatedAt });
+            if (ai !== undefined) {
+                sidecars.write({ ...sidecars.readByNoteId(change.entityId), ai });
+            }
+        }
+        catch (error) {
+            restoreFileSnapshots(rootPath, snapshots);
+            throw error;
+        }
         return;
     }
     const snapshots = [snapshotFile(notePath), snapshotFile(existingPath), snapshotFile(sidecars.getSidecarPathByNoteId(change.entityId))];
@@ -194,6 +214,7 @@ function applyPulledNoteUpsert(rootPath, change, body) {
             description: createNoteDescription(body),
             relativePath,
             updatedAt,
+            ...(ai === undefined ? {} : { ai }),
         });
     }
     catch (error) {
@@ -217,7 +238,34 @@ function applyPulledNoteDelete(rootPath, change) {
         fs.rmSync(sidecarPath, { force: true });
     }
 }
-function applyPulledChange(rootPath, change, transport) {
+function normalizeFolderRelativePath(rootPath, change) {
+    const rawRelativePath = metadataString(change.metadata, "relativePath") ?? change.relativePath ?? change.entityId;
+    const portableRelativePath = rawRelativePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/u, "");
+    if (portableRelativePath !== "note" && !portableRelativePath.startsWith("note/")) {
+        throw new UsageError(`Invalid pulled folder relativePath '${rawRelativePath}'.`, {
+            hint: "Pulled folder sync changes must target folders under note/.",
+        });
+    }
+    return toRootRelativePath(rootPath, assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath)));
+}
+function applyPulledFolderChange(rootPath, identity, change) {
+    const relativePath = normalizeFolderRelativePath(rootPath, change);
+    const deletedAt = change.changeType === "folder-delete" ? metadataString(change.metadata, "deletedAt") ?? change.changedAt : null;
+    if (deletedAt === null) {
+        fs.mkdirSync(assertPathInsideRoot(rootPath, path.join(rootPath, relativePath)), { recursive: true });
+    }
+    createFolderRepository(rootPath, identity).upsertFolder({
+        relativePath,
+        createdAt: change.changedAt,
+        updatedAt: change.changedAt,
+        deletedAt,
+    });
+}
+function applyPulledChange(rootPath, identity, change, transport) {
+    if (change.entityType === "folder" && (change.changeType === "folder-upsert" || change.changeType === "folder-delete")) {
+        applyPulledFolderChange(rootPath, identity, change);
+        return true;
+    }
     if (change.entityType !== "note") {
         return false;
     }
@@ -255,6 +303,7 @@ function toPushRecord(record) {
 function buildPushRequest(rootPath, workspaceId, replicaId, baseSequence, records) {
     const noteBodies = {};
     const pushRecords = records.map((record) => {
+        let pushRecord = toPushRecord(record);
         if (record.entityType === "note" && record.dirtyType === "upsert") {
             const sidecar = readSidecarIfExists(rootPath, record.entityId);
             const relativePath = sidecar?.relativePath ?? metadataString(record.metadata, "relativePath");
@@ -262,8 +311,22 @@ function buildPushRequest(rootPath, workspaceId, replicaId, baseSequence, record
                 const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
                 noteBodies[record.entityId] = createNoteRepository(rootPath).read(notePath).body;
             }
+            if (sidecar !== null) {
+                pushRecord = {
+                    ...pushRecord,
+                    metadata: {
+                        ...pushRecord.metadata,
+                        key: sidecar.key,
+                        title: sidecar.title,
+                        relativePath: sidecar.relativePath,
+                        createdAt: sidecar.createdAt,
+                        updatedAt: sidecar.updatedAt,
+                        ...(sidecar.ai === undefined ? {} : { ai: sidecar.ai }),
+                    },
+                };
+            }
         }
-        return toPushRecord(record);
+        return pushRecord;
     });
     return {
         workspaceId,
@@ -288,13 +351,15 @@ export function createSyncClientService(options) {
         syncNow() {
             let pulled = 0;
             let pushed = 0;
+            let needsRebuild = false;
             let sinceSequence = readLastPulledSequence(rootPath, identity, replicaId);
             const dirty = createDirtyRecordRepository(rootPath, identity);
             for (;;) {
                 const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit });
                 for (const change of response.changes) {
-                    if (applyPulledChange(rootPath, change, options.transport)) {
+                    if (applyPulledChange(rootPath, identity, change, options.transport)) {
                         dirty.clearDirtyRecord(change.entityType, change.entityId);
+                        needsRebuild = true;
                     }
                 }
                 pulled += response.changes.length;
@@ -304,12 +369,37 @@ export function createSyncClientService(options) {
                     break;
                 }
             }
+            if (needsRebuild) {
+                rebuildIndexes({ override: rootPath });
+            }
             const dirtyRecords = dirty.listDirtyRecords();
             if (dirtyRecords.length > 0) {
                 const pushResponse = options.transport.push(buildPushRequest(rootPath, options.workspaceId, replicaId, sinceSequence, dirtyRecords));
                 pushed = pushResponse.accepted.length;
                 clearAcceptedDirty(rootPath, identity, pushResponse);
-                writeReplicaProgress(rootPath, identity, replicaId, pushResponse.serverSequence, new Date().toISOString());
+                const pushedAt = new Date().toISOString();
+                while (pushResponse.serverSequence > sinceSequence) {
+                    const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit });
+                    for (const change of response.changes) {
+                        if (applyPulledChange(rootPath, identity, change, options.transport)) {
+                            dirty.clearDirtyRecord(change.entityType, change.entityId);
+                            needsRebuild = true;
+                        }
+                    }
+                    pulled += response.changes.length;
+                    if (response.toSequence <= sinceSequence) {
+                        break;
+                    }
+                    sinceSequence = response.toSequence;
+                    writeReplicaProgress(rootPath, identity, replicaId, sinceSequence, pushedAt);
+                    if (!response.hasMore) {
+                        break;
+                    }
+                }
+                writeReplicaProgress(rootPath, identity, replicaId, sinceSequence, pushedAt);
+                if (needsRebuild) {
+                    rebuildIndexes({ override: rootPath });
+                }
             }
             return { status: "synced", pushed, pulled };
         },

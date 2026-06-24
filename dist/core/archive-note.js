@@ -43,12 +43,12 @@ export function archiveNote(options) {
     recordSyncMutationBestEffort(rootPath, {
         notes: [{
                 entityId: syncEntityId,
+                dirtyType: "delete",
                 markedAt: archivedAt,
                 metadata: {
                     archivedAt,
                     key: selected.frontmatter.id,
                     previousRelativePath: selected.sourcePath,
-                    relativePath: archived.relativePath,
                     title: selected.frontmatter.title,
                 },
             }],

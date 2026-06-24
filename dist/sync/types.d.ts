@@ -45,12 +45,24 @@ export interface SyncNowSummary {
 }
 export interface SyncRepairOptions {
     dryRun?: boolean;
+    confirm?: "repair-sync-state";
+}
+export type SyncRepairIssueCode = "missing-sync-database" | "missing-sidecar" | "stale-dirty-record";
+export type SyncRepairIssueSeverity = "warning" | "error";
+export interface SyncRepairIssue {
+    code: SyncRepairIssueCode;
+    severity: SyncRepairIssueSeverity;
+    entityType?: string;
+    entityId?: string;
+    message: string;
+    suggestion: string;
 }
 export interface SyncRepairSummary {
     dryRun: boolean;
     changed: boolean;
     issuesFound: number;
     repairsApplied: number;
+    issues: SyncRepairIssue[];
 }
 export type SyncRootOptions = ResolveBlueNoteRootOptions;
 //# sourceMappingURL=types.d.ts.map

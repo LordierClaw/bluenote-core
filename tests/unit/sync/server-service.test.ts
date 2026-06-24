@@ -132,6 +132,51 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
   })
 })
 
+test("server accepts synced draft note upserts", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "draft-1": "Draft body.\n" },
+      records: [
+        {
+          entityType: "note",
+          entityId: "draft-1",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: {
+            key: "quick-draft",
+            title: "Quick Draft",
+            relativePath: "draft/quick-draft.md",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+          bodyUpload: { contentHash: "sha256:draft", byteLength: 12 },
+        },
+      ],
+    })
+
+    assert.deepEqual(response.accepted, [{ entityType: "note", entityId: "draft-1", serverRevision: 1 }])
+    assert.equal(response.rejected.length, 0)
+    assert.equal(readFileSync(path.join(rootPath, "draft", "quick-draft.md"), "utf8"), "Draft body.\n")
+    assert.deepEqual(createSidecarRepository(rootPath).readByNoteId("draft-1"), {
+      type: "draft",
+      noteId: "draft-1",
+      key: "quick-draft",
+      title: "Quick Draft",
+      description: "Draft body.",
+      relativePath: "draft/quick-draft.md",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      archivedAt: null,
+      namingVersion: 1,
+    })
+  })
+})
+
 test("server accepts folder dirty records so client folder queues can drain", async () => {
   await withRoot((rootPath) => {
     const server = createSyncServerService({ rootPath, workspaceId })

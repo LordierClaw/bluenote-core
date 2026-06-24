@@ -11,6 +11,7 @@ import { createSyncClientService } from "./client-service.js";
 import { getNoteSyncEntityId } from "./mutation-tracking.js";
 import { readSyncRuntimeMode, setSyncRuntimeMode } from "./runtime-mode.js";
 import { createSyncStatusRepository } from "./status-repository.js";
+import { repairSyncState } from "./repair.js";
 function resolveManagedRoot(options = {}) {
     return ensureManagedRoot(resolveBlueNoteRoot(options));
 }
@@ -173,11 +174,7 @@ export function syncCoreNow(options = {}) {
     }).syncNow();
 }
 export function repairCoreSync(options = {}) {
-    return {
-        dryRun: options.dryRun ?? true,
-        changed: false,
-        issuesFound: 0,
-        repairsApplied: 0,
-    };
+    const { dryRun, confirm, ...rootOptions } = options;
+    return repairSyncState(resolveBlueNoteRoot(rootOptions), { dryRun, confirm });
 }
 //# sourceMappingURL=core-sync.js.map

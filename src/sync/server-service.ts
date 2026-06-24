@@ -9,7 +9,7 @@ import { createNoteRepository } from "../storage/note-repository"
 import { serializePlainNote } from "../storage/plain-note"
 import { createSidecarRepository } from "../storage/sidecar-repository"
 import type { NoteSidecar } from "../storage/sidecar-schema"
-import { getNormalNotesPath } from "../storage/root-layout"
+import { getDraftNotesPath, getNormalNotesPath } from "../storage/root-layout"
 import type {
   DownloadNoteBodyResponse,
   PullChangesRequest,
@@ -109,13 +109,16 @@ function basenameKeyFromRelativePath(relativePath: string): string {
 
 function normalizeRelativePath(relativePath: string, rootPath: string): string {
   const portableRelativePath = relativePath.replace(/\\/g, "/").replace(/^\.\//, "")
-  if (!portableRelativePath.startsWith("note/") || !portableRelativePath.endsWith(".md")) {
+  const isSyncNotePath = portableRelativePath.startsWith("note/") || portableRelativePath.startsWith("draft/")
+  if (!isSyncNotePath || !portableRelativePath.endsWith(".md")) {
     throw new UsageError(`Invalid sync note relativePath '${relativePath}'.`, {
-      hint: "Note sync pushes must target Markdown files under note/.",
+      hint: "Note sync pushes must target Markdown files under note/ or draft/.",
     })
   }
 
   const absolutePath = assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath))
+  const allowedRoot = portableRelativePath.startsWith("draft/") ? getDraftNotesPath(rootPath) : getNormalNotesPath(rootPath)
+  assertPathInsideRoot(allowedRoot, absolutePath)
   return toRootRelativePath(rootPath, absolutePath)
 }
 
@@ -198,12 +201,22 @@ function noteMetadataFromPush(rootPath: string, record: SyncPushRecord): NoteMet
   return { key, title, relativePath, createdAt, updatedAt, contentHash, byteLength }
 }
 
-function ensureNormalFolder(rootPath: string, relativePath: string): void {
+function ensureSyncNoteFolder(rootPath: string, relativePath: string): void {
+  if (relativePath.startsWith("draft/")) {
+    fs.mkdirSync(getDraftNotesPath(rootPath), { recursive: true })
+    return
+  }
   const folderRelativePath = path.posix.dirname(relativePath)
   const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, folderRelativePath))
   const normalNotesPath = getNormalNotesPath(rootPath)
   assertPathInsideRoot(normalNotesPath, folderPath)
   fs.mkdirSync(folderPath, { recursive: true })
+}
+
+function createDestinationForRelativePath(relativePath: string): { type: "draft" } | { type: "normal"; folderRelativePath: string } {
+  return relativePath.startsWith("draft/")
+    ? { type: "draft" }
+    : { type: "normal", folderRelativePath: path.posix.dirname(relativePath) }
 }
 
 function readSidecarIfExists(rootPath: string, noteId: string): NoteSidecar | null {
@@ -293,7 +306,7 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Mut
   const rollback = makeRollback(snapshots)
 
   try {
-    ensureNormalFolder(rootPath, metadata.relativePath)
+    ensureSyncNoteFolder(rootPath, metadata.relativePath)
     assertRelativePathAvailable(rootPath, metadata.relativePath, record.entityId)
 
     if (sidecar === null) {
@@ -309,7 +322,7 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Mut
           createdAt: metadata.createdAt,
           updatedAt: metadata.updatedAt,
         },
-        destination: { type: "normal", folderRelativePath: path.posix.dirname(metadata.relativePath) },
+        destination: createDestinationForRelativePath(metadata.relativePath),
       })
       if (ai !== undefined) {
         sidecars.write({ ...sidecars.readByNoteId(record.entityId), ai })

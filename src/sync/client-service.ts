@@ -12,6 +12,7 @@ import { createSidecarRepository } from "../storage/sidecar-repository"
 import type { NoteSidecar } from "../storage/sidecar-schema"
 import { createDirtyRecordRepository } from "./dirty-repository"
 import type { DirtyRecord } from "./dirty-repository"
+import { createFolderRepository } from "./folder-repository"
 import type { SyncTransport } from "./core-sync"
 import type { SyncChangeView, SyncPushRecord, PushRequest, PushResponse } from "./protocol"
 import { type EnsureSyncDatabaseOptions, withSyncDatabase } from "./sync-db"
@@ -285,7 +286,36 @@ function applyPulledNoteDelete(rootPath: string, change: SyncChangeView): void {
   }
 }
 
-function applyPulledChange(rootPath: string, change: SyncChangeView, transport: SyncTransport): boolean {
+function normalizeFolderRelativePath(rootPath: string, change: SyncChangeView): string {
+  const rawRelativePath = metadataString(change.metadata, "relativePath") ?? change.relativePath ?? change.entityId
+  const portableRelativePath = rawRelativePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/u, "")
+  if (portableRelativePath !== "note" && !portableRelativePath.startsWith("note/")) {
+    throw new UsageError(`Invalid pulled folder relativePath '${rawRelativePath}'.`, {
+      hint: "Pulled folder sync changes must target folders under note/.",
+    })
+  }
+  return toRootRelativePath(rootPath, assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath)))
+}
+
+function applyPulledFolderChange(rootPath: string, identity: EnsureSyncDatabaseOptions, change: SyncChangeView): void {
+  const relativePath = normalizeFolderRelativePath(rootPath, change)
+  const deletedAt = change.changeType === "folder-delete" ? metadataString(change.metadata, "deletedAt") ?? change.changedAt : null
+  if (deletedAt === null) {
+    fs.mkdirSync(assertPathInsideRoot(rootPath, path.join(rootPath, relativePath)), { recursive: true })
+  }
+  createFolderRepository(rootPath, identity).upsertFolder({
+    relativePath,
+    createdAt: change.changedAt,
+    updatedAt: change.changedAt,
+    deletedAt,
+  })
+}
+
+function applyPulledChange(rootPath: string, identity: EnsureSyncDatabaseOptions, change: SyncChangeView, transport: SyncTransport): boolean {
+  if (change.entityType === "folder" && (change.changeType === "folder-upsert" || change.changeType === "folder-delete")) {
+    applyPulledFolderChange(rootPath, identity, change)
+    return true
+  }
   if (change.entityType !== "note") {
     return false
   }
@@ -385,7 +415,7 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
       for (;;) {
         const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit })
         for (const change of response.changes) {
-          if (applyPulledChange(rootPath, change, options.transport)) {
+          if (applyPulledChange(rootPath, identity, change, options.transport)) {
             dirty.clearDirtyRecord(change.entityType, change.entityId)
             needsRebuild = true
           }
@@ -411,7 +441,7 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
         while (pushResponse.serverSequence > sinceSequence) {
           const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit })
           for (const change of response.changes) {
-            if (applyPulledChange(rootPath, change, options.transport)) {
+            if (applyPulledChange(rootPath, identity, change, options.transport)) {
               dirty.clearDirtyRecord(change.entityType, change.entityId)
               needsRebuild = true
             }

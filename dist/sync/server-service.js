@@ -7,7 +7,7 @@ import { assertPathInsideRoot, toRootRelativePath } from "../platform/path-safet
 import { createNoteRepository } from "../storage/note-repository.js";
 import { serializePlainNote } from "../storage/plain-note.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
-import { getNormalNotesPath } from "../storage/root-layout.js";
+import { getDraftNotesPath, getNormalNotesPath } from "../storage/root-layout.js";
 import { isPullChangesRequest, isPushRequest } from "./protocol.js";
 import { parseSyncMetadata, serializeSyncMetadata, withSyncDatabase, } from "./sync-db.js";
 function stringMetadata(metadata, key) {
@@ -18,17 +18,41 @@ function numberMetadata(metadata, key) {
     const value = metadata[key];
     return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
+function objectMetadata(metadata, key) {
+    const value = metadata[key];
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
+}
 function basenameKeyFromRelativePath(relativePath) {
     return path.posix.basename(relativePath, ".md");
 }
 function normalizeRelativePath(relativePath, rootPath) {
     const portableRelativePath = relativePath.replace(/\\/g, "/").replace(/^\.\//, "");
-    if (!portableRelativePath.startsWith("note/") || !portableRelativePath.endsWith(".md")) {
+    const isSyncNotePath = portableRelativePath.startsWith("note/") || portableRelativePath.startsWith("draft/");
+    if (!isSyncNotePath || !portableRelativePath.endsWith(".md")) {
         throw new UsageError(`Invalid sync note relativePath '${relativePath}'.`, {
-            hint: "Note sync pushes must target Markdown files under note/.",
+            hint: "Note sync pushes must target Markdown files under note/ or draft/.",
         });
     }
     const absolutePath = assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath));
+    const allowedRoot = portableRelativePath.startsWith("draft/") ? getDraftNotesPath(rootPath) : getNormalNotesPath(rootPath);
+    assertPathInsideRoot(allowedRoot, absolutePath);
+    return toRootRelativePath(rootPath, absolutePath);
+}
+function normalizeFolderRelativePath(relativePath, rootPath) {
+    const portableRelativePath = relativePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/u, "");
+    if (portableRelativePath !== "note" && !portableRelativePath.startsWith("note/")) {
+        throw new UsageError(`Invalid sync folder relativePath '${relativePath}'.`, {
+            hint: "Folder sync pushes must target folders under note/.",
+        });
+    }
+    if (portableRelativePath.endsWith(".md")) {
+        throw new UsageError(`Invalid sync folder relativePath '${relativePath}'.`, {
+            hint: "Folder sync pushes must target directories, not Markdown note files.",
+        });
+    }
+    const absolutePath = assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath));
+    const normalNotesPath = getNormalNotesPath(rootPath);
+    assertPathInsideRoot(normalNotesPath, absolutePath);
     return toRootRelativePath(rootPath, absolutePath);
 }
 function metadataWithoutBody(metadata) {
@@ -83,12 +107,21 @@ function noteMetadataFromPush(rootPath, record) {
     }
     return { key, title, relativePath, createdAt, updatedAt, contentHash, byteLength };
 }
-function ensureNormalFolder(rootPath, relativePath) {
+function ensureSyncNoteFolder(rootPath, relativePath) {
+    if (relativePath.startsWith("draft/")) {
+        fs.mkdirSync(getDraftNotesPath(rootPath), { recursive: true });
+        return;
+    }
     const folderRelativePath = path.posix.dirname(relativePath);
     const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, folderRelativePath));
     const normalNotesPath = getNormalNotesPath(rootPath);
     assertPathInsideRoot(normalNotesPath, folderPath);
     fs.mkdirSync(folderPath, { recursive: true });
+}
+function createDestinationForRelativePath(relativePath) {
+    return relativePath.startsWith("draft/")
+        ? { type: "draft" }
+        : { type: "normal", folderRelativePath: path.posix.dirname(relativePath) };
 }
 function readSidecarIfExists(rootPath, noteId) {
     const sidecars = createSidecarRepository(rootPath);
@@ -161,13 +194,14 @@ function upsertNote(rootPath, record, body) {
     const repository = createNoteRepository(rootPath);
     const sidecars = createSidecarRepository(rootPath);
     const sidecar = readSidecarIfExists(rootPath, record.entityId);
+    const ai = objectMetadata(record.metadata, "ai");
     const targetPath = assertPathInsideRoot(rootPath, path.join(rootPath, metadata.relativePath));
     const sidecarPath = sidecars.getSidecarPathByNoteId(record.entityId);
     const existingPath = sidecar === null ? null : assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath));
     const snapshots = snapshotFiles([targetPath, sidecarPath, ...(existingPath === null ? [] : [existingPath])]);
     const rollback = makeRollback(snapshots);
     try {
-        ensureNormalFolder(rootPath, metadata.relativePath);
+        ensureSyncNoteFolder(rootPath, metadata.relativePath);
         assertRelativePathAvailable(rootPath, metadata.relativePath, record.entityId);
         if (sidecar === null) {
             repository.create({
@@ -182,8 +216,11 @@ function upsertNote(rootPath, record, body) {
                     createdAt: metadata.createdAt,
                     updatedAt: metadata.updatedAt,
                 },
-                destination: { type: "normal", folderRelativePath: path.posix.dirname(metadata.relativePath) },
+                destination: createDestinationForRelativePath(metadata.relativePath),
             });
+            if (ai !== undefined) {
+                sidecars.write({ ...sidecars.readByNoteId(record.entityId), ai });
+            }
         }
         else {
             if (sidecar.relativePath !== metadata.relativePath || sidecar.key !== metadata.key) {
@@ -205,6 +242,7 @@ function upsertNote(rootPath, record, body) {
                     description: createNoteDescription(body),
                     relativePath: metadata.relativePath,
                     updatedAt: metadata.updatedAt,
+                    ...(ai === undefined ? {} : { ai }),
                 });
             }
             else {
@@ -213,6 +251,9 @@ function upsertNote(rootPath, record, body) {
                     body,
                     updatedAt: metadata.updatedAt,
                 });
+                if (ai !== undefined) {
+                    sidecars.write({ ...sidecars.readByNoteId(record.entityId), ai });
+                }
             }
         }
     }
@@ -258,6 +299,42 @@ function deleteNote(rootPath, record) {
             },
         },
         rollback,
+    };
+}
+function applyFolderPush(rootPath, handle, record) {
+    const relativePath = normalizeFolderRelativePath(stringMetadata(record.metadata, "relativePath") ?? record.entityId, rootPath);
+    const deletedAt = record.dirtyType === "folder-delete" ? record.clientUpdatedAt : null;
+    const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
+    const existed = fs.existsSync(folderPath);
+    if (record.dirtyType === "folder-upsert") {
+        fs.mkdirSync(folderPath, { recursive: true });
+    }
+    handle.db.run(`
+      INSERT INTO folders (relativePath, createdAt, updatedAt, deletedAt)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(relativePath) DO UPDATE SET
+        updatedAt = excluded.updatedAt,
+        deletedAt = excluded.deletedAt
+    `, [relativePath, record.clientUpdatedAt, record.clientUpdatedAt, deletedAt]);
+    return {
+        value: {
+            relativePath,
+            deletedAt,
+            metadata: {
+                relativePath,
+                ...(deletedAt === null ? {} : { deletedAt }),
+            },
+        },
+        rollback() {
+            if (!existed && record.dirtyType === "folder-upsert") {
+                try {
+                    fs.rmdirSync(folderPath);
+                }
+                catch {
+                    // Best-effort rollback: preserve original sync error.
+                }
+            }
+        },
     };
 }
 function latestServerRevision(handle, entityType, entityId) {
@@ -424,6 +501,23 @@ export function createSyncServerService(options) {
                                         metadata: deletion.metadata,
                                     };
                                 }
+                                else if (record.entityType === "folder" && (record.dirtyType === "folder-upsert" || record.dirtyType === "folder-delete")) {
+                                    const folderMutation = applyFolderPush(rootPath, handle, record);
+                                    rollbackRecord = folderMutation.rollback;
+                                    const folder = folderMutation.value;
+                                    appliedChange = {
+                                        entityType: "folder",
+                                        entityId: folder.relativePath,
+                                        changeType: record.dirtyType,
+                                        serverRevision: 0,
+                                        changedAt,
+                                        sourceReplicaId: request.replicaId,
+                                        title: null,
+                                        relativePath: folder.relativePath,
+                                        bodyAvailable: false,
+                                        metadata: folder.metadata,
+                                    };
+                                }
                                 else {
                                     throw new UsageError(`Unsupported sync push record '${record.entityType}:${record.dirtyType}'.`, {
                                         hint: "Task 11 implements note upsert/delete server handling only.",
@@ -488,8 +582,16 @@ export function createSyncServerService(options) {
             return withSyncDatabase(rootPath, dbIdentity, (handle) => {
                 const rows = handle.db.exec(`
             SELECT sequence, entityType, entityId, changeType, serverRevision, changedAt, title, relativePath, bodyAvailable, metadataJson
-            FROM server_changes
+            FROM server_changes AS changes
             WHERE workspaceId = ? AND sequence > ?
+              AND NOT EXISTS (
+                SELECT 1
+                FROM server_changes AS newer
+                WHERE newer.workspaceId = changes.workspaceId
+                  AND newer.entityType = changes.entityType
+                  AND newer.entityId = changes.entityId
+                  AND newer.sequence > changes.sequence
+              )
             ORDER BY sequence ASC
             LIMIT ?
           `, [options.workspaceId, request.sinceSequence, request.limit + 1])[0]?.values ?? [];

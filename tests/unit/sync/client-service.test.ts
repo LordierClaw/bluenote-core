@@ -5,7 +5,7 @@ import path from "node:path"
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
-import { createBlueNoteCore, createDirtyRecordRepository, type SyncTransport } from "../../../src"
+import { createBlueNoteCore, createDirtyRecordRepository, createFolderRepository, type SyncTransport } from "../../../src"
 import { createSyncClientService } from "../../../src/sync/client-service"
 import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import { setSyncRuntimeMode } from "../../../src/sync/runtime-mode"
@@ -262,6 +262,42 @@ describe("sync client service", () => {
     })
   })
 
+  test("pulled folder upserts create local empty folders and folder records", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 7,
+          hasMore: false,
+          changes: [{
+            sequence: 7,
+            entityType: "folder",
+            entityId: "note/projects/empty",
+            changeType: "folder-upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            relativePath: "note/projects/empty",
+            bodyAvailable: false,
+            metadata: { relativePath: "note/projects/empty" },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "empty")), true)
+      assert.deepEqual(createFolderRepository(rootPath, { role: "client", workspaceId }).listFolders(), [
+        {
+          relativePath: "note/projects/empty",
+          createdAt: "2026-06-24T01:00:00.000Z",
+          updatedAt: "2026-06-24T01:00:00.000Z",
+          deletedAt: null,
+        },
+      ])
+    })
+  })
+
   test("push response does not mark unseen server changes as pulled", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
@@ -412,7 +448,7 @@ describe("sync client service", () => {
     })
   })
 
-  test("ignored pulled non-note changes do not clear local dirty records", async () => {
+  test("pulled folder changes clear matching local dirty folder records", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
       const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
@@ -441,9 +477,9 @@ describe("sync client service", () => {
         }),
       })
 
-      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 1, pulled: 2 })
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
       assert.equal(dirty.listDirtyRecords().length, 0)
-      assert.equal(transport.pushes[0].records[0].dirtyType, "folder-upsert")
+      assert.equal(transport.pushes.length, 0)
     })
   })
 
