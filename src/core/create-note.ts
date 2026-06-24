@@ -146,6 +146,15 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
     destination,
   })
 
+  recordSyncMutationBestEffort(rootPath, {
+    notes: [{
+      entityId: noteId,
+      markedAt: timestamp,
+      metadata: { key, relativePath: created.relativePath, title },
+    }],
+    folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
+  })
+
   const rebuildSummary = rebuildIndexes({ override: rootPath })
 
   if (rebuildSummary.validationErrors.length > 0) {
@@ -167,15 +176,6 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
       clock,
     })
   }
-
-  recordSyncMutationBestEffort(rootPath, {
-    notes: [{
-      entityId: noteId,
-      markedAt: timestamp,
-      metadata: { key, relativePath: created.relativePath, title },
-    }],
-    folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
-  })
 
   return {
     noteId,

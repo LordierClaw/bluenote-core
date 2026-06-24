@@ -314,6 +314,47 @@ describe("sync client service", () => {
     })
   })
 
+  test("failed first-time pulled note sidecar metadata rolls back the created note", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        bodies: { "note-bad-ai": "Remote bad AI body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 7,
+          hasMore: false,
+          changes: [{
+            sequence: 7,
+            entityType: "note",
+            entityId: "note-bad-ai",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Bad AI",
+            relativePath: "note/bad-ai.md",
+            bodyAvailable: true,
+            metadata: {
+              key: "bad-ai",
+              relativePath: "note/bad-ai.md",
+              title: "Bad AI",
+              createdAt: "2026-06-24T01:00:00.000Z",
+              updatedAt: "2026-06-24T01:00:00.000Z",
+              ai: { description: { lastProcessedAt: 42 } },
+            },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /lastProcessedAt/i,
+      )
+      assert.equal(existsSync(path.join(rootPath, "note", "bad-ai.md")), false)
+      assert.equal(existsSync(path.join(rootPath, ".data", "notes", "note-bad-ai.json")), false)
+    })
+  })
+
   test("sync cycle normalizes dirty folder records to protocol folder dirty types", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

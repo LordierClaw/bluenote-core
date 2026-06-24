@@ -109,6 +109,14 @@ export function createNote(options) {
         body: options.body ?? "",
         destination,
     });
+    recordSyncMutationBestEffort(rootPath, {
+        notes: [{
+                entityId: noteId,
+                markedAt: timestamp,
+                metadata: { key, relativePath: created.relativePath, title },
+            }],
+        folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
+    });
     const rebuildSummary = rebuildIndexes({ override: rootPath });
     if (rebuildSummary.validationErrors.length > 0) {
         throw new IndexValidationFailedError([`Created note '${key}', but derived indexes could not be rebuilt.`, ...rebuildSummary.validationErrors].join("\n"), {
@@ -125,14 +133,6 @@ export function createNote(options) {
             clock,
         });
     }
-    recordSyncMutationBestEffort(rootPath, {
-        notes: [{
-                entityId: noteId,
-                markedAt: timestamp,
-                metadata: { key, relativePath: created.relativePath, title },
-            }],
-        folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
-    });
     return {
         noteId,
         key,

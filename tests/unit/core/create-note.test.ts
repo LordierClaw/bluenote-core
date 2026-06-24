@@ -1,6 +1,6 @@
 import { test } from "vitest"
 import assert from "node:assert/strict"
-import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -115,6 +115,53 @@ test("createNote marks canonical destination folder dirty in sync-client mode", 
       ["folder", "note/projects"],
       ["note", "note_sync_folder_dirty"],
     ])
+  })
+})
+
+test("createNote records sync dirty state before post-create rebuild validation can fail", async () => {
+  await withTempRoot("bluenote-create-note-sync-dirty-rebuild-failure-", async (rootPath) => {
+    await enableSyncClientMode(rootPath)
+    await writeFile(path.join(rootPath, ".data", "notes", "orphan.json"), JSON.stringify({
+      type: "normal",
+      key: "orphan",
+      title: "Orphan",
+      description: "Missing note",
+      relativePath: "note/missing/orphan.md",
+      createdAt: "2026-06-06T11:00:00.000Z",
+      updatedAt: "2026-06-06T11:00:00.000Z",
+      archivedAt: null,
+      namingVersion: 1,
+    }), "utf8")
+
+    assert.throws(
+      () => createNote({
+        override: rootPath,
+        type: "draft",
+        title: "Needs Sync",
+        body: "Persisted before rebuild failure.\n",
+        noteIdGenerator: () => "note_create_rebuild_dirty",
+        randomSource: () => 46655,
+        clock: fixedClock("2026-06-06T12:00:00.000Z"),
+      }),
+      /derived indexes could not be rebuilt/i,
+    )
+
+    assert.deepEqual(listDirtyRecords(rootPath), [
+      {
+        entityType: "note",
+        entityId: "note_create_rebuild_dirty",
+        dirtyType: "upsert",
+        markedAt: "2026-06-06T12:00:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: {
+          key: "needs-sync-000zzz",
+          relativePath: "draft/needs-sync-000zzz.md",
+          title: "Needs Sync",
+        },
+      },
+    ])
+    assert.equal(await readFile(path.join(rootPath, "draft", "needs-sync-000zzz.md"), "utf8"), "Persisted before rebuild failure.\n")
   })
 })
 

@@ -170,23 +170,30 @@ function applyPulledNoteUpsert(rootPath, change, body) {
     const ai = metadataObject(change.metadata, "ai");
     const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
     if (existingSidecar === null) {
-        fs.mkdirSync(path.dirname(notePath), { recursive: true });
-        notes.create({
-            noteId: change.entityId,
-            body,
-            frontmatter: {
-                id: key,
-                schemaVersion: 1,
-                title,
-                mode: "plain",
-                tags: [],
-                createdAt,
-                updatedAt,
-            },
-            destination: destinationForPulledNote(relativePath),
-        });
-        if (ai !== undefined) {
-            sidecars.write({ ...sidecars.readByNoteId(change.entityId), ai });
+        const snapshots = [snapshotFile(notePath), snapshotFile(sidecars.getSidecarPathByNoteId(change.entityId))];
+        try {
+            fs.mkdirSync(path.dirname(notePath), { recursive: true });
+            notes.create({
+                noteId: change.entityId,
+                body,
+                frontmatter: {
+                    id: key,
+                    schemaVersion: 1,
+                    title,
+                    mode: "plain",
+                    tags: [],
+                    createdAt,
+                    updatedAt,
+                },
+                destination: destinationForPulledNote(relativePath),
+            });
+            if (ai !== undefined) {
+                sidecars.write({ ...sidecars.readByNoteId(change.entityId), ai });
+            }
+        }
+        catch (error) {
+            restoreFileSnapshots(rootPath, snapshots);
+            throw error;
         }
         return;
     }
