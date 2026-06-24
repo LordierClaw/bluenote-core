@@ -240,6 +240,9 @@ describe("sync HTTP transport", () => {
         assert.match(error.message, /https:\/\/\[redacted\]@example\.invalid\/sync\/sync\/v1\/changes\/pull\?token=%5Bredacted%5D/)
         assert.equal(error.message.includes("user:pass"), false)
         assert.equal(error.message.includes("token=abc"), false)
+        assert(error.cause instanceof Error)
+        assert.equal(error.cause.message.includes("user:pass"), false)
+        assert.equal(error.cause.message.includes("token=abc"), false)
         return true
       },
     )

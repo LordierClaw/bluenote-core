@@ -112,6 +112,15 @@ function logUrlWithBaseSecrets(baseUrl: string, requestUrl: string): string {
   return parsed.toString()
 }
 
+function sanitizedFetchCause(error: unknown): Error {
+  if (error instanceof Error) {
+    const sanitized = new Error(redactSyncHttpUrl(error.message))
+    sanitized.name = error.name
+    return sanitized
+  }
+  return new Error(redactSyncHttpUrl(String(error)))
+}
+
 export function redactSyncHttpUrl(rawUrl: string | URL): string {
   try {
     const parsed = new URL(String(rawUrl))
@@ -165,7 +174,7 @@ async function requestJson<T>(fetchImpl: SyncHttpFetch, baseUrl: string, endpoin
   try {
     response = await fetchImpl(url, init)
   } catch (error) {
-    throw new UsageError(`Sync HTTP ${label} request failed for ${redactSyncHttpUrl(logUrlWithBaseSecrets(baseUrl, url))}.`, { cause: error })
+    throw new UsageError(`Sync HTTP ${label} request failed for ${redactSyncHttpUrl(logUrlWithBaseSecrets(baseUrl, url))}.`, { cause: sanitizedFetchCause(error) })
   }
   return parseJsonResponse(response, logUrlWithBaseSecrets(baseUrl, url), validate, label)
 }
