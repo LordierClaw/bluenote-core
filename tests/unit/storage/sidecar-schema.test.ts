@@ -111,6 +111,43 @@ test("validateNoteSidecar accepts and preserves AI description freshness metadat
   })
 })
 
+test("validateNoteSidecar accepts and preserves schema 3 noteId metadata", () => {
+  const sidecar = validateNoteSidecar(
+    {
+      ...canonicalSidecar(),
+      noteId: "01JZ4B0XQJ9HZM6QW4HD3Z9V6A",
+    },
+    ".data/notes/01JZ4B0XQJ9HZM6QW4HD3Z9V6A.json",
+    { requireNoteId: true },
+  )
+
+  assert.equal(sidecar.noteId, "01JZ4B0XQJ9HZM6QW4HD3Z9V6A")
+  assert.deepEqual(sidecar, {
+    ...canonicalSidecar(),
+    noteId: "01JZ4B0XQJ9HZM6QW4HD3Z9V6A",
+  })
+})
+
+test("validateNoteSidecar rejects schema 3 sidecars missing noteId", () => {
+  assert.throws(
+    () => validateNoteSidecar(canonicalSidecar(), ".data/notes/note-work-24-abc123.json", { requireNoteId: true }),
+    (error: unknown) => {
+      assert.ok(error instanceof InvalidFrontmatterError)
+      assert.match(error.message, /noteId/i)
+      return true
+    },
+  )
+})
+
+test("validateNoteSidecar keeps legacy schema 2 sidecars readable without noteId", () => {
+  const sidecar = validateNoteSidecar(canonicalSidecar(), ".data/notes/note-work-24-abc123.json", {
+    requireNoteId: false,
+  })
+
+  assert.equal("noteId" in sidecar, false)
+  assert.deepEqual(sidecar, canonicalSidecar())
+})
+
 test("validateNoteSidecar still accepts existing sidecars with no AI metadata", () => {
   const sidecar = validateNoteSidecar(canonicalSidecar(), ".data/notes/note-work-24-abc123.json")
 

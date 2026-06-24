@@ -15,6 +15,7 @@ export type NoteType = "normal" | "draft" | "archived"
 
 export interface NoteSidecar {
   type: NoteType
+  noteId?: string
   key: string
   title: string
   description: string
@@ -30,6 +31,10 @@ export interface NoteSidecar {
   }
 }
 
+export interface ValidateNoteSidecarOptions {
+  requireNoteId?: boolean
+}
+
 const REQUIRED_SIDECAR_FIELDS = [
   "type",
   "key",
@@ -42,7 +47,7 @@ const REQUIRED_SIDECAR_FIELDS = [
   "namingVersion",
 ] as const
 
-const OPTIONAL_SIDECAR_FIELDS = ["ai"] as const
+const OPTIONAL_SIDECAR_FIELDS = ["noteId", "ai"] as const
 const AI_FIELDS = ["description"] as const
 const AI_DESCRIPTION_FIELDS = ["lastProcessedAt"] as const
 
@@ -175,6 +180,29 @@ function assertDescriptionField(record: Record<string, unknown>, sourcePath: str
   return value
 }
 
+function validateNoteIdMetadata(
+  record: Record<string, unknown>,
+  sourcePath: string,
+  validationKind: string,
+  options: ValidateNoteSidecarOptions,
+): string | undefined {
+  if (record.noteId === undefined) {
+    if (options.requireNoteId === true) {
+      throw new InvalidFrontmatterError(`Invalid ${validationKind} in ${sourcePath}: 'noteId' must be a non-empty string.`)
+    }
+
+    return undefined
+  }
+
+  const noteId = assertStringField(record, "noteId", sourcePath, validationKind)
+
+  if (options.requireNoteId === true && noteId.trim() === "") {
+    throw new InvalidFrontmatterError(`Invalid ${validationKind} in ${sourcePath}: 'noteId' must be a non-empty string.`)
+  }
+
+  return noteId
+}
+
 function validateAiMetadata(
   value: unknown,
   sourcePath: string,
@@ -213,7 +241,11 @@ function validateAiMetadata(
   }
 }
 
-export function validateNoteSidecar(sidecar: unknown, sourcePath: string): NoteSidecar {
+export function validateNoteSidecar(
+  sidecar: unknown,
+  sourcePath: string,
+  options: ValidateNoteSidecarOptions = {},
+): NoteSidecar {
   const validationKind = "sidecar metadata"
 
   if (!isRecord(sidecar)) {
@@ -222,6 +254,7 @@ export function validateNoteSidecar(sidecar: unknown, sourcePath: string): NoteS
 
   assertKnownFields(sidecar, [...REQUIRED_SIDECAR_FIELDS, ...OPTIONAL_SIDECAR_FIELDS], sourcePath, validationKind)
   assertRequiredFields(sidecar, REQUIRED_SIDECAR_FIELDS.filter((field) => field !== "type"), sourcePath, validationKind)
+  const noteId = validateNoteIdMetadata(sidecar, sourcePath, validationKind, options)
   const ai = validateAiMetadata(sidecar.ai, sourcePath, validationKind)
   const relativePath = toPortableRelativePath(assertStringField(sidecar, "relativePath", sourcePath, validationKind))
   const archivedAt = assertArchivedAtField(sidecar, sourcePath)
@@ -231,6 +264,7 @@ export function validateNoteSidecar(sidecar: unknown, sourcePath: string): NoteS
 
   return {
     type: noteType,
+    ...(noteId === undefined ? {} : { noteId }),
     key: assertStringField(sidecar, "key", sourcePath, validationKind),
     title: assertStringField(sidecar, "title", sourcePath, validationKind),
     description: assertDescriptionField(sidecar, sourcePath),

@@ -189,6 +189,31 @@ test("sidecar repository rejects missing required sidecar fields when writing", 
   }
 })
 
+test("sidecar repository write validation reports noteId paths when noteId exists", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sidecar-repository-note-id-path-"))
+
+  try {
+    const repository = createSidecarRepository(rootPath)
+
+    assert.throws(
+      () =>
+        repository.write({
+          ...FIXED_SIDECAR,
+          noteId: "01JZ4B0XQJ9HZM6QW4HD3Z9V6A",
+          updatedAt: "not-a-timestamp",
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof InvalidFrontmatterError)
+        assert.match(error.message, /01JZ4B0XQJ9HZM6QW4HD3Z9V6A\.json/i)
+        assert.match(error.message, /updatedAt/i)
+        return true
+      },
+    )
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("sidecar repository rejects invalid stored sidecars", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sidecar-repository-invalid-read-"))
 

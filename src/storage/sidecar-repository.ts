@@ -15,6 +15,12 @@ export interface SidecarRepository {
 
 function getWriteValidationSourcePath(sidecar: unknown): string {
   if (typeof sidecar === "object" && sidecar !== null) {
+    const candidateNoteId = (sidecar as { noteId?: unknown }).noteId
+
+    if (typeof candidateNoteId === "string") {
+      return path.join(STATE_NOTES_DIRECTORY, `${candidateNoteId}.json`)
+    }
+
     const candidateKey = (sidecar as { key?: unknown }).key
 
     if (typeof candidateKey === "string") {
