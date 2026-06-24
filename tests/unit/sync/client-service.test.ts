@@ -1,0 +1,215 @@
+import { describe, test } from "vitest"
+import assert from "node:assert/strict"
+import os from "node:os"
+import path from "node:path"
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs"
+import { mkdtemp, rm } from "node:fs/promises"
+
+import { createBlueNoteCore, createDirtyRecordRepository, type SyncTransport } from "../../../src"
+import { createSyncClientService } from "../../../src/sync/client-service"
+import { setSyncRuntimeMode } from "../../../src/sync/runtime-mode"
+import type { PullChangesRequest, PullChangesResponse, PushRequest, PushResponse } from "../../../src/sync/protocol"
+
+const workspaceId = "workspace-client-service"
+const replicaId = "replica-client-a"
+
+interface TestTransport extends SyncTransport {
+  calls: string[]
+  pushes: Array<PushRequest & { noteBodies?: Record<string, string> }>
+}
+
+async function withRoot<T>(callback: (rootPath: string) => T | Promise<T>): Promise<T> {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-client-service-"))
+  try {
+    return await callback(rootPath)
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+}
+
+function makeTransport(options: {
+  pull?: (request: PullChangesRequest) => PullChangesResponse
+  push?: (request: PushRequest & { noteBodies?: Record<string, string> }) => PushResponse
+  bodies?: Record<string, string>
+} = {}): TestTransport {
+  const pushes: Array<PushRequest & { noteBodies?: Record<string, string> }> = []
+  const calls: string[] = []
+  return {
+    calls,
+    pushes,
+    pull(request) {
+      calls.push("pull")
+      return options.pull?.(request) ?? { workspaceId: request.workspaceId, fromSequence: request.sinceSequence, toSequence: request.sinceSequence, hasMore: false, changes: [] }
+    },
+    push(request) {
+      calls.push("push")
+      pushes.push(request)
+      return options.push?.(request) ?? {
+        accepted: request.records.map((record, index) => ({ entityType: record.entityType, entityId: record.entityId, serverRevision: index + 1 })),
+        replacedByServer: [],
+        rejected: [],
+        serverSequence: request.baseSequence + request.records.length,
+      }
+    },
+    downloadNoteBody(noteId) {
+      calls.push(`download:${noteId}`)
+      return { workspaceId, noteId, body: options.bodies?.[noteId] ?? "Server body.\n" }
+    },
+  }
+}
+
+function enableClient(rootPath: string): void {
+  createBlueNoteCore({ rootPath }).init()
+  setSyncRuntimeMode(rootPath, { mode: "sync-client", workspaceId })
+}
+
+function listRecoveryOrConflictFiles(rootPath: string): string[] {
+  const found: string[] = []
+  function visit(directoryPath: string): void {
+    if (!existsSync(directoryPath)) return
+    for (const entry of readdirSync(directoryPath, { withFileTypes: true })) {
+      const entryPath = path.join(directoryPath, entry.name)
+      if (entry.isDirectory()) visit(entryPath)
+      if (entry.isFile() && /conflict|recovery/i.test(entry.name)) found.push(entryPath)
+    }
+  }
+  visit(rootPath)
+  return found
+}
+
+describe("sync client service", () => {
+  test("sync cycle pulls before pushing dirty records and clears accepted pushes", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Local Dirty",
+        body: "Local dirty body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-local-dirty",
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+      dirty.markDirty({
+        entityType: "note",
+        entityId: note.noteId,
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { key: note.key, relativePath: note.relativePath, title: "Local Dirty" },
+      })
+      const transport = makeTransport()
+
+      const summary = createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
+
+      assert.deepEqual(transport.calls, ["pull", "push"])
+      assert.equal(transport.pushes.length, 1)
+      assert.equal(transport.pushes[0].records.length, 1)
+      assert.equal(transport.pushes[0].records[0].entityId, note.noteId)
+      assert.equal(transport.pushes[0].noteBodies?.[note.noteId], "Local dirty body.\n")
+      assert.deepEqual(summary, { status: "synced", pushed: 1, pulled: 0 })
+      assert.deepEqual(dirty.listDirtyRecords(), [])
+    })
+  })
+
+  test("newer pulled server note replaces a locally dirty note without pushing or preserving conflict files", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Local Title",
+        body: "Local dirty content must be overwritten.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-overwrite",
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+      dirty.markDirty({
+        entityType: "note",
+        entityId: note.noteId,
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { key: note.key, relativePath: note.relativePath, title: "Local Title" },
+      })
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Server body wins.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 5,
+          hasMore: false,
+          changes: [{
+            sequence: 5,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Server Title",
+            relativePath: note.relativePath,
+            bodyAvailable: true,
+            metadata: { key: note.key, relativePath: note.relativePath, title: "Server Title", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      const summary = createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
+
+      assert.deepEqual(transport.calls, ["pull", `download:${note.noteId}`])
+      assert.equal(transport.pushes.length, 0)
+      assert.deepEqual(summary, { status: "synced", pushed: 0, pulled: 1 })
+      assert.deepEqual(dirty.listDirtyRecords(), [])
+      const updated = core.notes.get(note.key)
+      assert.equal(updated.title, "Server Title")
+      assert.equal(updated.body, "Server body wins.\n")
+      assert.equal(readFileSync(note.notePath, "utf8").includes("Local dirty content must be overwritten"), false)
+      assert.deepEqual(listRecoveryOrConflictFiles(rootPath), [])
+    })
+  })
+
+  test("sync cycle normalizes dirty folder records to protocol folder dirty types", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      dirty.markDirty({
+        entityType: "folder",
+        entityId: "note/projects",
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/projects" },
+      })
+      const transport = makeTransport()
+
+      createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
+
+      assert.equal(transport.pushes.length, 1)
+      assert.deepEqual(transport.pushes[0].records, [{
+        entityType: "folder",
+        entityId: "note/projects",
+        dirtyType: "folder-upsert",
+        clientUpdatedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/projects" },
+      }])
+    })
+  })
+
+  test("createBlueNoteCore sync.now uses a configured abstract transport", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport()
+      const core = createBlueNoteCore({ rootPath, syncTransport: transport, syncReplicaId: replicaId })
+
+      assert.deepEqual(core.sync.now(), { status: "synced", pushed: 0, pulled: 0 })
+      assert.deepEqual(transport.calls, ["pull"])
+    })
+  })
+})

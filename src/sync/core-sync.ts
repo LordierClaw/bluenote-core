@@ -8,9 +8,11 @@ import { createNoteRepository } from "../storage/note-repository"
 import { readStateManifest } from "../storage/state-manifest"
 import { createDirtyRecordRepository } from "./dirty-repository"
 import { createFolderRepository } from "./folder-repository"
+import { createSyncClientService } from "./client-service"
 import { getNoteSyncEntityId } from "./mutation-tracking"
 import { readSyncRuntimeMode, setSyncRuntimeMode } from "./runtime-mode"
 import { createSyncStatusRepository } from "./status-repository"
+import type { DownloadNoteBodyResponse, PullChangesRequest, PullChangesResponse, PushRequest, PushResponse } from "./protocol"
 import type {
   SyncLinkOptions,
   SyncLinkSummary,
@@ -21,6 +23,12 @@ import type {
   SyncStatusView,
   SyncUnlinkSummary,
 } from "./types"
+
+export interface SyncTransport {
+  pull(request: PullChangesRequest): PullChangesResponse
+  push(request: PushRequest & { noteBodies?: Record<string, string> }): PushResponse
+  downloadNoteBody(noteId: string): DownloadNoteBodyResponse
+}
 
 export type {
   SyncLinkOptions,
@@ -198,14 +206,28 @@ export function unlinkCoreSync(options: ResolveBlueNoteRootOptions = {}): SyncUn
 }
 
 export function syncCoreNow(options: SyncNowOptions & ResolveBlueNoteRootOptions = {}): SyncNowSummary {
-  const { force: _force, ...rootOptions } = options
-  const runtimeMode = readSyncRuntimeMode(resolveBlueNoteRoot(rootOptions))
+  const { force: _force, transport, replicaId, ...rootOptions } = options
+  const rootPath = resolveBlueNoteRoot(rootOptions)
+  const runtimeMode = readSyncRuntimeMode(rootPath)
 
-  return {
-    status: runtimeMode.mode === "standalone" ? "not-linked" : "transport-not-configured",
-    pushed: 0,
-    pulled: 0,
+  if (runtimeMode.mode === "standalone") {
+    return { status: "not-linked", pushed: 0, pulled: 0 }
   }
+
+  if (!transport) {
+    return { status: "transport-not-configured", pushed: 0, pulled: 0 }
+  }
+
+  if (!runtimeMode.workspaceId) {
+    throw new Error("Sync client runtime mode is missing a workspace ID.")
+  }
+
+  return createSyncClientService({
+    rootPath: resolveManagedRoot(rootOptions),
+    workspaceId: runtimeMode.workspaceId,
+    replicaId,
+    transport,
+  }).syncNow()
 }
 
 export function repairCoreSync(options: SyncRepairOptions & ResolveBlueNoteRootOptions = {}): SyncRepairSummary {

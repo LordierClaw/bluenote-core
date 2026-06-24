@@ -136,7 +136,11 @@ export function createBlueNoteCore(config = {}) {
                 return unlinkCoreSync(applyRoot(config, options));
             },
             now(options = {}) {
-                return syncCoreNow(withRoot(config, options));
+                return syncCoreNow({
+                    transport: options.transport ?? config.syncTransport,
+                    replicaId: options.replicaId ?? config.syncReplicaId,
+                    ...withRoot(config, options),
+                });
             },
             repair(options = {}) {
                 return repairCoreSync(withRoot(config, options));

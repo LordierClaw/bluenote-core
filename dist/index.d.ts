@@ -11,7 +11,7 @@ import { type PromoteDraftOptions, type PromoteDraftSummary } from "./core/promo
 import { type SearchNoteMatch } from "./core/search-notes.js";
 import { type RebuildIndexesOptions, type RebuildIndexesSummary } from "./core/rebuild-indexes.js";
 import type { NoteVisibilityOptions } from "./core/note-visibility.js";
-import { type SyncLinkOptions, type SyncLinkSummary, type SyncNowOptions, type SyncNowSummary, type SyncRepairOptions, type SyncRepairSummary, type SyncStatusView, type SyncUnlinkSummary } from "./sync/core-sync.js";
+import { type SyncLinkOptions, type SyncLinkSummary, type SyncNowOptions, type SyncNowSummary, type SyncRepairOptions, type SyncRepairSummary, type SyncStatusView, type SyncTransport, type SyncUnlinkSummary } from "./sync/core-sync.js";
 export * from "./core/errors.js";
 export type * from "./core/types.js";
 export * from "./core/archive-note.js";
@@ -80,6 +80,8 @@ export * from "./search/contains-match.js";
 export type { InitRootSummary, NoteSummary, ShowNoteSummary, CreateNoteOptions, CreateNoteSummary, DeleteNoteSummary, ArchiveNoteSummary, RenameNoteSummary, MoveNoteSummary, PromoteDraftSummary, SearchNoteMatch, RebuildIndexesSummary, };
 export interface BlueNoteCoreConfig extends Omit<ResolveBlueNoteRootOptions, "override"> {
     rootPath?: string;
+    syncTransport?: SyncTransport;
+    syncReplicaId?: string;
 }
 export type BlueNoteCoreRootOptions = Omit<ResolveBlueNoteRootOptions, "override"> & {
     rootPath?: string;

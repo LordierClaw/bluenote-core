@@ -40,9 +40,11 @@ export interface SyncUnlinkSummary {
 
 export interface SyncNowOptions {
   force?: boolean
+  transport?: import("./core-sync").SyncTransport
+  replicaId?: string
 }
 
-export type SyncNowStatus = "not-linked" | "transport-not-configured"
+export type SyncNowStatus = "not-linked" | "transport-not-configured" | "synced"
 
 export interface SyncNowSummary {
   status: SyncNowStatus

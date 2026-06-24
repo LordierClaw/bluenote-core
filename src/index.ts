@@ -24,6 +24,7 @@ import {
   type SyncRepairOptions,
   type SyncRepairSummary,
   type SyncStatusView,
+  type SyncTransport,
   type SyncUnlinkSummary,
 } from "./sync/core-sync"
 
@@ -121,6 +122,8 @@ export type {
 
 export interface BlueNoteCoreConfig extends Omit<ResolveBlueNoteRootOptions, "override"> {
   rootPath?: string
+  syncTransport?: SyncTransport
+  syncReplicaId?: string
 }
 
 export type BlueNoteCoreRootOptions = Omit<ResolveBlueNoteRootOptions, "override"> & {
@@ -230,7 +233,11 @@ export function createBlueNoteCore(config: BlueNoteCoreConfig = {}): BlueNoteCor
         return unlinkCoreSync(applyRoot(config, options))
       },
       now(options = {}) {
-        return syncCoreNow(withRoot(config, options))
+        return syncCoreNow({
+          transport: options.transport ?? config.syncTransport,
+          replicaId: options.replicaId ?? config.syncReplicaId,
+          ...withRoot(config, options),
+        })
       },
       repair(options = {}) {
         return repairCoreSync(withRoot(config, options))

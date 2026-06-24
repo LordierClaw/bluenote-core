@@ -7,6 +7,7 @@ import { createNoteRepository } from "../storage/note-repository.js";
 import { readStateManifest } from "../storage/state-manifest.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
 import { createFolderRepository } from "./folder-repository.js";
+import { createSyncClientService } from "./client-service.js";
 import { getNoteSyncEntityId } from "./mutation-tracking.js";
 import { readSyncRuntimeMode, setSyncRuntimeMode } from "./runtime-mode.js";
 import { createSyncStatusRepository } from "./status-repository.js";
@@ -152,13 +153,24 @@ export function unlinkCoreSync(options = {}) {
     };
 }
 export function syncCoreNow(options = {}) {
-    const { force: _force, ...rootOptions } = options;
-    const runtimeMode = readSyncRuntimeMode(resolveBlueNoteRoot(rootOptions));
-    return {
-        status: runtimeMode.mode === "standalone" ? "not-linked" : "transport-not-configured",
-        pushed: 0,
-        pulled: 0,
-    };
+    const { force: _force, transport, replicaId, ...rootOptions } = options;
+    const rootPath = resolveBlueNoteRoot(rootOptions);
+    const runtimeMode = readSyncRuntimeMode(rootPath);
+    if (runtimeMode.mode === "standalone") {
+        return { status: "not-linked", pushed: 0, pulled: 0 };
+    }
+    if (!transport) {
+        return { status: "transport-not-configured", pushed: 0, pulled: 0 };
+    }
+    if (!runtimeMode.workspaceId) {
+        throw new Error("Sync client runtime mode is missing a workspace ID.");
+    }
+    return createSyncClientService({
+        rootPath: resolveManagedRoot(rootOptions),
+        workspaceId: runtimeMode.workspaceId,
+        replicaId,
+        transport,
+    }).syncNow();
 }
 export function repairCoreSync(options = {}) {
     return {
