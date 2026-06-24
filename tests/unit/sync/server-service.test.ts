@@ -2,14 +2,14 @@ import { test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
 import initSqlJs from "sql.js"
 
 import { createSyncServerService } from "../../../src/sync/server-service"
-import { createSidecarRepository, createTombstoneRepository, ensureSyncDatabase } from "../../../src"
+import { createSidecarRepository, createTombstoneRepository, ensureSyncDatabase, UsageError } from "../../../src"
 
 const workspaceId = "workspace-server"
 const dbIdentity = { role: "server" as const, workspaceId }
@@ -183,6 +183,123 @@ test("server allocates in-batch revisions transactionally for repeated entity ch
       server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 }).changes.map((change) => change.serverRevision),
       [1, 2],
     )
+  })
+})
+
+test("server validates malformed push requests before mutating local files", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    assert.throws(
+      () => server.acceptPush({ workspaceId, replicaId: "client-a", baseSequence: 0, records: "not-an-array" } as never),
+      UsageError,
+    )
+    assert.deepEqual(readServerChanges(rootPath), [])
+  })
+})
+
+test("server rejects path collisions instead of overwriting another note", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-a": "Original A.\n", "note-b": "Original B.\n" },
+      records: [
+        {
+          entityType: "note",
+          entityId: "note-a",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: { key: "note-a", title: "Note A", relativePath: "note/note-a.md" },
+          bodyUpload: { contentHash: "sha256:a", byteLength: 12 },
+        },
+        {
+          entityType: "note",
+          entityId: "note-b",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: { key: "note-b", title: "Note B", relativePath: "note/note-b.md" },
+          bodyUpload: { contentHash: "sha256:b", byteLength: 12 },
+        },
+      ],
+    })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 2,
+      noteBodies: { "note-a": "Should not overwrite B.\n" },
+      records: [
+        {
+          entityType: "note",
+          entityId: "note-a",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+          metadata: { key: "note-b", title: "Colliding A", relativePath: "note/note-b.md" },
+          bodyUpload: { contentHash: "sha256:collision", byteLength: 24 },
+        },
+      ],
+    })
+
+    assert.equal(response.accepted.length, 0)
+    assert.equal(response.rejected.length, 1)
+    assert.equal(readFileSync(path.join(rootPath, "note", "note-b.md"), "utf8"), "Original B.\n")
+    assert.equal(createSidecarRepository(rootPath).readByNoteId("note-b").title, "Note B")
+  })
+})
+
+test("server rejects invalid delete metadata paths without tombstones or changes", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      records: [
+        {
+          entityType: "note",
+          entityId: "missing-note",
+          dirtyType: "delete",
+          clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+          metadata: { relativePath: "../outside.md", title: "Bad Delete" },
+        },
+      ],
+    })
+
+    assert.equal(response.accepted.length, 0)
+    assert.equal(response.rejected.length, 1)
+    assert.deepEqual(createTombstoneRepository(rootPath, dbIdentity).listTombstones(), [])
+    assert.deepEqual(server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 }).changes, [])
+  })
+})
+
+test("server holds the sync DB lock before mutating accepted push files", async () => {
+  await withRoot((rootPath) => {
+    mkdirSync(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"))
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    assert.throws(
+      () => server.acceptPush({
+        workspaceId,
+        replicaId: "client-a",
+        baseSequence: 0,
+        noteBodies: { "note-locked": "Should not be written.\n" },
+        records: [
+          {
+            entityType: "note",
+            entityId: "note-locked",
+            dirtyType: "upsert",
+            clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+            metadata: { key: "note-locked", title: "Locked", relativePath: "note/note-locked.md" },
+            bodyUpload: { contentHash: "sha256:locked", byteLength: 23 },
+          },
+        ],
+      }),
+      UsageError,
+    )
+    assert.equal(existsSync(path.join(rootPath, "note", "note-locked.md")), false)
   })
 })
 
