@@ -40,6 +40,33 @@ function metadataWithoutBody(metadata) {
     }
     return clean;
 }
+function snapshotFiles(filePaths) {
+    const uniquePaths = Array.from(new Set(filePaths));
+    return uniquePaths.map((filePath) => ({
+        filePath,
+        existed: fs.existsSync(filePath),
+        content: fs.existsSync(filePath) ? fs.readFileSync(filePath) : null,
+    }));
+}
+function restoreFileSnapshots(snapshots) {
+    for (const snapshot of [...snapshots].reverse()) {
+        try {
+            if (snapshot.existed) {
+                fs.mkdirSync(path.dirname(snapshot.filePath), { recursive: true });
+                fs.writeFileSync(snapshot.filePath, snapshot.content ?? Buffer.alloc(0));
+            }
+            else {
+                fs.rmSync(snapshot.filePath, { force: true });
+            }
+        }
+        catch {
+            // Best-effort rollback: preserve the original sync error.
+        }
+    }
+}
+function makeRollback(snapshots) {
+    return () => restoreFileSnapshots(snapshots);
+}
 function noteMetadataFromPush(rootPath, record) {
     const metadata = metadataWithoutBody(record.metadata);
     const relativePath = normalizeRelativePath(stringMetadata(metadata, "relativePath") ?? `note/${record.entityId}.md`, rootPath);
@@ -132,7 +159,12 @@ function assertValidPullRequest(request) {
 function upsertNote(rootPath, record, body) {
     const metadata = noteMetadataFromPush(rootPath, record);
     const repository = createNoteRepository(rootPath);
+    const sidecars = createSidecarRepository(rootPath);
     const sidecar = readSidecarIfExists(rootPath, record.entityId);
+    const targetPath = assertPathInsideRoot(rootPath, path.join(rootPath, metadata.relativePath));
+    const sidecarPath = sidecars.getSidecarPathByNoteId(record.entityId);
+    const existingPath = sidecar === null ? null : assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath));
+    const snapshots = snapshotFiles([targetPath, sidecarPath, ...(existingPath === null ? [] : [existingPath])]);
     ensureNormalFolder(rootPath, metadata.relativePath);
     assertRelativePathAvailable(rootPath, metadata.relativePath, record.entityId);
     if (sidecar === null) {
@@ -152,15 +184,19 @@ function upsertNote(rootPath, record, body) {
         });
     }
     else {
-        const existingPath = assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath));
         if (sidecar.relativePath !== metadata.relativePath || sidecar.key !== metadata.key) {
-            const nextPath = assertPathInsideRoot(rootPath, path.join(rootPath, metadata.relativePath));
+            const nextPath = targetPath;
+            if (nextPath !== existingPath && fs.existsSync(nextPath)) {
+                throw new UsageError(`Cannot sync note '${record.entityId}' to '${metadata.relativePath}'.`, {
+                    hint: "The destination Markdown file already exists.",
+                });
+            }
             fs.mkdirSync(path.dirname(nextPath), { recursive: true });
             fs.writeFileSync(nextPath, serializePlainNote({ body, sourcePath: metadata.relativePath }), "utf8");
-            if (nextPath !== existingPath && fs.existsSync(existingPath)) {
+            if (nextPath !== existingPath && existingPath !== null && fs.existsSync(existingPath)) {
                 fs.rmSync(existingPath);
             }
-            createSidecarRepository(rootPath).write({
+            sidecars.write({
                 ...sidecar,
                 key: metadata.key,
                 title: metadata.title,
@@ -170,14 +206,14 @@ function upsertNote(rootPath, record, body) {
             });
         }
         else {
-            repository.syncEditedNote(existingPath, {
+            repository.syncEditedNote(existingPath ?? targetPath, {
                 title: metadata.title,
                 body,
                 updatedAt: metadata.updatedAt,
             });
         }
     }
-    return metadata;
+    return { value: metadata, rollback: makeRollback(snapshots) };
 }
 function deleteNote(rootPath, record) {
     const pushedMetadata = metadataWithoutBody(record.metadata);
@@ -185,26 +221,29 @@ function deleteNote(rootPath, record) {
     const title = stringMetadata(pushedMetadata, "title") ?? existingSidecar?.title ?? null;
     const pushedRelativePath = stringMetadata(pushedMetadata, "relativePath");
     const relativePath = pushedRelativePath === null ? existingSidecar?.relativePath ?? null : normalizeRelativePath(pushedRelativePath, rootPath);
-    if (existingSidecar !== null) {
-        const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, existingSidecar.relativePath));
+    const sidecars = createSidecarRepository(rootPath);
+    const notePath = existingSidecar === null ? null : assertPathInsideRoot(rootPath, path.join(rootPath, existingSidecar.relativePath));
+    const sidecarPath = sidecars.getSidecarPathByNoteId(record.entityId);
+    const snapshots = snapshotFiles([sidecarPath, ...(notePath === null ? [] : [notePath])]);
+    if (existingSidecar !== null && notePath !== null) {
         if (fs.existsSync(notePath)) {
             createNoteRepository(rootPath).delete(notePath);
         }
-        else {
-            const sidecarPath = createSidecarRepository(rootPath).getSidecarPathByNoteId(record.entityId);
-            if (fs.existsSync(sidecarPath)) {
-                fs.rmSync(sidecarPath);
-            }
+        else if (fs.existsSync(sidecarPath)) {
+            fs.rmSync(sidecarPath);
         }
     }
     return {
-        title,
-        relativePath,
-        metadata: {
-            deletedAt: record.clientUpdatedAt,
-            previousRelativePath: relativePath,
-            previousTitle: title,
+        value: {
+            title,
+            relativePath,
+            metadata: {
+                deletedAt: record.clientUpdatedAt,
+                previousRelativePath: relativePath,
+                previousTitle: title,
+            },
         },
+        rollback: makeRollback(snapshots),
     };
 }
 function latestServerRevision(handle, entityType, entityId) {
@@ -312,99 +351,118 @@ export function createSyncServerService(options) {
             assertValidPushRequest(request);
             assertWorkspace(options.workspaceId, request.workspaceId);
             const aiNoteIds = [];
-            const response = withSyncDatabase(rootPath, dbIdentity, (handle) => {
-                const accepted = [];
-                const rejected = [];
-                handle.db.run("BEGIN IMMEDIATE TRANSACTION");
-                try {
-                    const latestRevisions = new Map();
-                    for (const record of request.records) {
-                        try {
-                            const changedAt = new Date().toISOString();
-                            let appliedChange;
-                            if (record.entityType === "note" && record.dirtyType === "upsert") {
-                                const body = request.noteBodies?.[record.entityId];
-                                if (typeof body !== "string") {
-                                    throw new UsageError(`Missing note body for pushed note '${record.entityId}'.`, {
-                                        hint: "Include noteBodies[noteId] when pushing note upserts to the in-process sync server.",
+            const acceptedRollbacks = [];
+            let response;
+            try {
+                response = withSyncDatabase(rootPath, dbIdentity, (handle) => {
+                    const accepted = [];
+                    const rejected = [];
+                    handle.db.run("BEGIN IMMEDIATE TRANSACTION");
+                    try {
+                        const latestRevisions = new Map();
+                        for (const record of request.records) {
+                            let rollbackRecord = () => undefined;
+                            try {
+                                const changedAt = new Date().toISOString();
+                                let appliedChange;
+                                if (record.entityType === "note" && record.dirtyType === "upsert") {
+                                    const body = request.noteBodies?.[record.entityId];
+                                    if (typeof body !== "string") {
+                                        throw new UsageError(`Missing note body for pushed note '${record.entityId}'.`, {
+                                            hint: "Include noteBodies[noteId] when pushing note upserts to the in-process sync server.",
+                                        });
+                                    }
+                                    const mutation = upsertNote(rootPath, record, body);
+                                    rollbackRecord = mutation.rollback;
+                                    const metadata = mutation.value;
+                                    const changeMetadata = metadataWithoutBody({
+                                        ...record.metadata,
+                                        ...(metadata.contentHash === undefined ? {} : { contentHash: metadata.contentHash }),
+                                        ...(metadata.byteLength === undefined ? {} : { byteLength: metadata.byteLength }),
+                                    });
+                                    appliedChange = {
+                                        entityType: "note",
+                                        entityId: record.entityId,
+                                        changeType: "upsert",
+                                        serverRevision: 0,
+                                        changedAt,
+                                        sourceReplicaId: request.replicaId,
+                                        title: metadata.title,
+                                        relativePath: metadata.relativePath,
+                                        bodyAvailable: true,
+                                        metadata: changeMetadata,
+                                    };
+                                }
+                                else if (record.entityType === "note" && record.dirtyType === "delete") {
+                                    const deletionMutation = deleteNote(rootPath, record);
+                                    rollbackRecord = deletionMutation.rollback;
+                                    const deletion = deletionMutation.value;
+                                    appliedChange = {
+                                        entityType: "note",
+                                        entityId: record.entityId,
+                                        changeType: "delete",
+                                        serverRevision: 0,
+                                        changedAt,
+                                        sourceReplicaId: request.replicaId,
+                                        title: deletion.title,
+                                        relativePath: deletion.relativePath,
+                                        bodyAvailable: false,
+                                        metadata: deletion.metadata,
+                                    };
+                                }
+                                else {
+                                    throw new UsageError(`Unsupported sync push record '${record.entityType}:${record.dirtyType}'.`, {
+                                        hint: "Task 11 implements note upsert/delete server handling only.",
                                     });
                                 }
-                                const metadata = upsertNote(rootPath, record, body);
-                                const changeMetadata = metadataWithoutBody({
-                                    ...record.metadata,
-                                    ...(metadata.contentHash === undefined ? {} : { contentHash: metadata.contentHash }),
-                                    ...(metadata.byteLength === undefined ? {} : { byteLength: metadata.byteLength }),
-                                });
-                                appliedChange = {
-                                    entityType: "note",
-                                    entityId: record.entityId,
-                                    changeType: "upsert",
-                                    serverRevision: 0,
-                                    changedAt,
-                                    sourceReplicaId: request.replicaId,
-                                    title: metadata.title,
-                                    relativePath: metadata.relativePath,
-                                    bodyAvailable: true,
-                                    metadata: changeMetadata,
-                                };
-                                aiNoteIds.push(record.entityId);
+                                const revisionKey = `${appliedChange.entityType}\u0000${appliedChange.entityId}`;
+                                const previousRevision = latestRevisions.get(revisionKey) ?? latestServerRevision(handle, appliedChange.entityType, appliedChange.entityId);
+                                const serverRevision = previousRevision + 1;
+                                latestRevisions.set(revisionKey, serverRevision);
+                                appliedChange.serverRevision = serverRevision;
+                                insertServerChange(handle, options.workspaceId, appliedChange);
+                                accepted.push({ entityType: record.entityType, entityId: record.entityId, serverRevision });
+                                acceptedRollbacks.push(rollbackRecord);
+                                if (record.entityType === "note" && record.dirtyType === "upsert") {
+                                    aiNoteIds.push(record.entityId);
+                                }
                             }
-                            else if (record.entityType === "note" && record.dirtyType === "delete") {
-                                const deletion = deleteNote(rootPath, record);
-                                appliedChange = {
-                                    entityType: "note",
+                            catch (error) {
+                                rollbackRecord();
+                                rejected.push({
+                                    entityType: record.entityType,
                                     entityId: record.entityId,
-                                    changeType: "delete",
-                                    serverRevision: 0,
-                                    changedAt,
-                                    sourceReplicaId: request.replicaId,
-                                    title: deletion.title,
-                                    relativePath: deletion.relativePath,
-                                    bodyAvailable: false,
-                                    metadata: deletion.metadata,
-                                };
-                            }
-                            else {
-                                throw new UsageError(`Unsupported sync push record '${record.entityType}:${record.dirtyType}'.`, {
-                                    hint: "Task 11 implements note upsert/delete server handling only.",
+                                    code: "PUSH_REJECTED",
+                                    message: error instanceof Error ? error.message : String(error),
                                 });
                             }
-                            const revisionKey = `${appliedChange.entityType}\u0000${appliedChange.entityId}`;
-                            const previousRevision = latestRevisions.get(revisionKey) ?? latestServerRevision(handle, appliedChange.entityType, appliedChange.entityId);
-                            const serverRevision = previousRevision + 1;
-                            latestRevisions.set(revisionKey, serverRevision);
-                            appliedChange.serverRevision = serverRevision;
-                            insertServerChange(handle, options.workspaceId, appliedChange);
-                            accepted.push({ entityType: record.entityType, entityId: record.entityId, serverRevision });
                         }
-                        catch (error) {
-                            rejected.push({
-                                entityType: record.entityType,
-                                entityId: record.entityId,
-                                code: "PUSH_REJECTED",
-                                message: error instanceof Error ? error.message : String(error),
-                            });
+                        const latestSequence = latestServerSequence(handle);
+                        handle.db.run("COMMIT");
+                        return {
+                            accepted,
+                            replacedByServer: [],
+                            rejected,
+                            serverSequence: latestSequence,
+                        };
+                    }
+                    catch (error) {
+                        try {
+                            handle.db.run("ROLLBACK");
                         }
+                        catch {
+                            // Preserve the original error.
+                        }
+                        throw error;
                     }
-                    const latestSequence = latestServerSequence(handle);
-                    handle.db.run("COMMIT");
-                    return {
-                        accepted,
-                        replacedByServer: [],
-                        rejected,
-                        serverSequence: latestSequence,
-                    };
+                }, { save: true });
+            }
+            catch (error) {
+                for (const rollback of [...acceptedRollbacks].reverse()) {
+                    rollback();
                 }
-                catch (error) {
-                    try {
-                        handle.db.run("ROLLBACK");
-                    }
-                    catch {
-                        // Preserve the original error.
-                    }
-                    throw error;
-                }
-            }, { save: true });
+                throw error;
+            }
             for (const noteId of aiNoteIds) {
                 queueAiWork(options.queueAiWork, noteId);
             }

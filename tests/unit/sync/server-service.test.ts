@@ -2,7 +2,7 @@ import { test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
-import { existsSync, mkdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
@@ -247,6 +247,78 @@ test("server rejects path collisions instead of overwriting another note", async
     assert.equal(response.rejected.length, 1)
     assert.equal(readFileSync(path.join(rootPath, "note", "note-b.md"), "utf8"), "Original B.\n")
     assert.equal(createSidecarRepository(rootPath).readByNoteId("note-b").title, "Note B")
+  })
+})
+
+test("server rejects relocation onto an existing Markdown file without a sidecar", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-a": "Original A.\n" },
+      records: [
+        {
+          entityType: "note",
+          entityId: "note-a",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: { key: "note-a", title: "Note A", relativePath: "note/note-a.md" },
+          bodyUpload: { contentHash: "sha256:a", byteLength: 12 },
+        },
+      ],
+    })
+    writeFileSync(path.join(rootPath, "note", "raw-existing.md"), "Raw orphan note.\n", "utf8")
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 1,
+      noteBodies: { "note-a": "Should not overwrite raw.\n" },
+      records: [
+        {
+          entityType: "note",
+          entityId: "note-a",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+          metadata: { key: "raw-existing", title: "Colliding Raw", relativePath: "note/raw-existing.md" },
+          bodyUpload: { contentHash: "sha256:raw-collision", byteLength: 26 },
+        },
+      ],
+    })
+
+    assert.equal(response.accepted.length, 0)
+    assert.equal(response.rejected.length, 1)
+    assert.equal(readFileSync(path.join(rootPath, "note", "raw-existing.md"), "utf8"), "Raw orphan note.\n")
+    assert.equal(readFileSync(path.join(rootPath, "note", "note-a.md"), "utf8"), "Original A.\n")
+  })
+})
+
+test("server rolls back files when change metadata cannot be serialized", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-bigint": "Should be rolled back.\n" },
+      records: [
+        {
+          entityType: "note",
+          entityId: "note-bigint",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: { key: "note-bigint", title: "BigInt", relativePath: "note/note-bigint.md", unserializable: BigInt(1) },
+          bodyUpload: { contentHash: "sha256:bigint", byteLength: 23 },
+        },
+      ],
+    })
+
+    assert.equal(response.accepted.length, 0)
+    assert.equal(response.rejected.length, 1)
+    assert.equal(existsSync(path.join(rootPath, "note", "note-bigint.md")), false)
+    assert.deepEqual(readServerChanges(rootPath), [])
   })
 })
 

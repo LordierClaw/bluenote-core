@@ -77,6 +77,17 @@ interface NoteMetadata {
   byteLength?: number
 }
 
+interface FileSnapshot {
+  filePath: string
+  existed: boolean
+  content: Buffer | null
+}
+
+interface MutationResult<T> {
+  value: T
+  rollback: () => void
+}
+
 function stringMetadata(metadata: Record<string, unknown>, key: string): string | null {
   const value = metadata[key]
   return typeof value === "string" ? value : null
@@ -111,6 +122,34 @@ function metadataWithoutBody(metadata: Record<string, unknown>): Record<string, 
     }
   }
   return clean
+}
+
+function snapshotFiles(filePaths: string[]): FileSnapshot[] {
+  const uniquePaths = Array.from(new Set(filePaths))
+  return uniquePaths.map((filePath) => ({
+    filePath,
+    existed: fs.existsSync(filePath),
+    content: fs.existsSync(filePath) ? fs.readFileSync(filePath) : null,
+  }))
+}
+
+function restoreFileSnapshots(snapshots: FileSnapshot[]): void {
+  for (const snapshot of [...snapshots].reverse()) {
+    try {
+      if (snapshot.existed) {
+        fs.mkdirSync(path.dirname(snapshot.filePath), { recursive: true })
+        fs.writeFileSync(snapshot.filePath, snapshot.content ?? Buffer.alloc(0))
+      } else {
+        fs.rmSync(snapshot.filePath, { force: true })
+      }
+    } catch {
+      // Best-effort rollback: preserve the original sync error.
+    }
+  }
+}
+
+function makeRollback(snapshots: FileSnapshot[]): () => void {
+  return () => restoreFileSnapshots(snapshots)
 }
 
 function noteMetadataFromPush(rootPath: string, record: SyncPushRecord): NoteMetadata {
@@ -217,10 +256,15 @@ function assertValidPullRequest(request: PullChangesRequest): void {
   }
 }
 
-function upsertNote(rootPath: string, record: SyncPushRecord, body: string): NoteMetadata {
+function upsertNote(rootPath: string, record: SyncPushRecord, body: string): MutationResult<NoteMetadata> {
   const metadata = noteMetadataFromPush(rootPath, record)
   const repository = createNoteRepository(rootPath)
+  const sidecars = createSidecarRepository(rootPath)
   const sidecar = readSidecarIfExists(rootPath, record.entityId)
+  const targetPath = assertPathInsideRoot(rootPath, path.join(rootPath, metadata.relativePath))
+  const sidecarPath = sidecars.getSidecarPathByNoteId(record.entityId)
+  const existingPath = sidecar === null ? null : assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath))
+  const snapshots = snapshotFiles([targetPath, sidecarPath, ...(existingPath === null ? [] : [existingPath])])
 
   ensureNormalFolder(rootPath, metadata.relativePath)
   assertRelativePathAvailable(rootPath, metadata.relativePath, record.entityId)
@@ -241,15 +285,19 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Not
       destination: { type: "normal", folderRelativePath: path.posix.dirname(metadata.relativePath) },
     })
   } else {
-    const existingPath = assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath))
     if (sidecar.relativePath !== metadata.relativePath || sidecar.key !== metadata.key) {
-      const nextPath = assertPathInsideRoot(rootPath, path.join(rootPath, metadata.relativePath))
+      const nextPath = targetPath
+      if (nextPath !== existingPath && fs.existsSync(nextPath)) {
+        throw new UsageError(`Cannot sync note '${record.entityId}' to '${metadata.relativePath}'.`, {
+          hint: "The destination Markdown file already exists.",
+        })
+      }
       fs.mkdirSync(path.dirname(nextPath), { recursive: true })
       fs.writeFileSync(nextPath, serializePlainNote({ body, sourcePath: metadata.relativePath }), "utf8")
-      if (nextPath !== existingPath && fs.existsSync(existingPath)) {
+      if (nextPath !== existingPath && existingPath !== null && fs.existsSync(existingPath)) {
         fs.rmSync(existingPath)
       }
-      createSidecarRepository(rootPath).write({
+      sidecars.write({
         ...sidecar,
         key: metadata.key,
         title: metadata.title,
@@ -258,7 +306,7 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Not
         updatedAt: metadata.updatedAt,
       })
     } else {
-      repository.syncEditedNote(existingPath, {
+      repository.syncEditedNote(existingPath ?? targetPath, {
         title: metadata.title,
         body,
         updatedAt: metadata.updatedAt,
@@ -266,36 +314,39 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Not
     }
   }
 
-  return metadata
+  return { value: metadata, rollback: makeRollback(snapshots) }
 }
 
-function deleteNote(rootPath: string, record: SyncPushRecord): { title: string | null; relativePath: string | null; metadata: Record<string, unknown> } {
+function deleteNote(rootPath: string, record: SyncPushRecord): MutationResult<{ title: string | null; relativePath: string | null; metadata: Record<string, unknown> }> {
   const pushedMetadata = metadataWithoutBody(record.metadata)
   const existingSidecar = readSidecarIfExists(rootPath, record.entityId)
   const title = stringMetadata(pushedMetadata, "title") ?? existingSidecar?.title ?? null
   const pushedRelativePath = stringMetadata(pushedMetadata, "relativePath")
   const relativePath = pushedRelativePath === null ? existingSidecar?.relativePath ?? null : normalizeRelativePath(pushedRelativePath, rootPath)
+  const sidecars = createSidecarRepository(rootPath)
+  const notePath = existingSidecar === null ? null : assertPathInsideRoot(rootPath, path.join(rootPath, existingSidecar.relativePath))
+  const sidecarPath = sidecars.getSidecarPathByNoteId(record.entityId)
+  const snapshots = snapshotFiles([sidecarPath, ...(notePath === null ? [] : [notePath])])
 
-  if (existingSidecar !== null) {
-    const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, existingSidecar.relativePath))
+  if (existingSidecar !== null && notePath !== null) {
     if (fs.existsSync(notePath)) {
       createNoteRepository(rootPath).delete(notePath)
-    } else {
-      const sidecarPath = createSidecarRepository(rootPath).getSidecarPathByNoteId(record.entityId)
-      if (fs.existsSync(sidecarPath)) {
-        fs.rmSync(sidecarPath)
-      }
+    } else if (fs.existsSync(sidecarPath)) {
+      fs.rmSync(sidecarPath)
     }
   }
 
   return {
-    title,
-    relativePath,
-    metadata: {
-      deletedAt: record.clientUpdatedAt,
-      previousRelativePath: relativePath,
-      previousTitle: title,
+    value: {
+      title,
+      relativePath,
+      metadata: {
+        deletedAt: record.clientUpdatedAt,
+        previousRelativePath: relativePath,
+        previousTitle: title,
+      },
     },
+    rollback: makeRollback(snapshots),
   }
 }
 
@@ -422,8 +473,11 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
       assertValidPushRequest(request)
       assertWorkspace(options.workspaceId, request.workspaceId)
       const aiNoteIds: string[] = []
+      const acceptedRollbacks: Array<() => void> = []
 
-      const response = withSyncDatabase(rootPath, dbIdentity, (handle) => {
+      let response: PushResponse
+      try {
+        response = withSyncDatabase(rootPath, dbIdentity, (handle) => {
         const accepted: PushAcceptedRecord[] = []
         const rejected: PushRejectedRecord[] = []
 
@@ -432,6 +486,7 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
           const latestRevisions = new Map<string, number>()
 
           for (const record of request.records) {
+            let rollbackRecord = (): void => undefined
             try {
               const changedAt = new Date().toISOString()
               let appliedChange: AppliedChange
@@ -443,7 +498,9 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
                     hint: "Include noteBodies[noteId] when pushing note upserts to the in-process sync server.",
                   })
                 }
-                const metadata = upsertNote(rootPath, record, body)
+                const mutation = upsertNote(rootPath, record, body)
+                rollbackRecord = mutation.rollback
+                const metadata = mutation.value
                 const changeMetadata = metadataWithoutBody({
                   ...record.metadata,
                   ...(metadata.contentHash === undefined ? {} : { contentHash: metadata.contentHash }),
@@ -461,9 +518,10 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
                   bodyAvailable: true,
                   metadata: changeMetadata,
                 }
-                aiNoteIds.push(record.entityId)
               } else if (record.entityType === "note" && record.dirtyType === "delete") {
-                const deletion = deleteNote(rootPath, record)
+                const deletionMutation = deleteNote(rootPath, record)
+                rollbackRecord = deletionMutation.rollback
+                const deletion = deletionMutation.value
                 appliedChange = {
                   entityType: "note",
                   entityId: record.entityId,
@@ -489,7 +547,12 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
               appliedChange.serverRevision = serverRevision
               insertServerChange(handle, options.workspaceId, appliedChange)
               accepted.push({ entityType: record.entityType, entityId: record.entityId, serverRevision })
+              acceptedRollbacks.push(rollbackRecord)
+              if (record.entityType === "note" && record.dirtyType === "upsert") {
+                aiNoteIds.push(record.entityId)
+              }
             } catch (error) {
+              rollbackRecord()
               rejected.push({
                 entityType: record.entityType,
                 entityId: record.entityId,
@@ -516,6 +579,12 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
           throw error
         }
       }, { save: true })
+      } catch (error) {
+      for (const rollback of [...acceptedRollbacks].reverse()) {
+        rollback()
+      }
+      throw error
+      }
 
       for (const noteId of aiNoteIds) {
         queueAiWork(options.queueAiWork, noteId)
