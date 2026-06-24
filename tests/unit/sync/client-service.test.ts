@@ -5,7 +5,7 @@ import path from "node:path"
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
-import { createBlueNoteCore, createDirtyRecordRepository, createFolderRepository, type SyncTransport } from "../../../src"
+import { createBlueNoteCore, createDirtyRecordRepository, createFolderRepository, getCoreSyncStatus, type SyncTransport } from "../../../src"
 import { createSyncClientService } from "../../../src/sync/client-service"
 import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import { setSyncRuntimeMode } from "../../../src/sync/runtime-mode"
@@ -150,6 +150,9 @@ describe("sync client service", () => {
       assert.equal(pending.entityId, "note-rejected")
       assert.equal(pending.attempts, 1)
       assert.match(pending.lastError ?? "", /destination path already exists/)
+      const status = getCoreSyncStatus({ override: rootPath })
+      assert.equal(status.failedCount, 1)
+      assert.match(status.lastError ?? "", /destination path already exists/)
     })
   })
 

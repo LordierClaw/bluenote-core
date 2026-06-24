@@ -81,16 +81,18 @@ export function getCoreSyncStatus(options = {}) {
     }
     const identity = { role: "client", workspaceId };
     const statusSummary = createSyncStatusRepository(rootPath, identity).readStatusSummary();
-    const pendingCount = createDirtyRecordRepository(rootPath, identity).listDirtyRecords().length;
+    const dirtyRecords = createDirtyRecordRepository(rootPath, identity).listDirtyRecords();
+    const failedRecords = dirtyRecords.filter((record) => record.lastError !== null);
+    const latestDirtyError = [...failedRecords].reverse().find((record) => record.lastError !== null)?.lastError ?? null;
     return {
         state: "linked",
         mode: "sync-client",
         activity: "idle",
         workspaceId,
-        pendingCount,
+        pendingCount: dirtyRecords.length,
         runningCount: statusSummary?.runningCount ?? 0,
-        failedCount: statusSummary?.failedCount ?? 0,
-        lastError: statusSummary?.lastError ?? null,
+        failedCount: failedRecords.length || statusSummary?.failedCount || 0,
+        lastError: latestDirtyError ?? statusSummary?.lastError ?? null,
     };
 }
 export function linkCoreSync(options) {
