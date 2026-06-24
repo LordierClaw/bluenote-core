@@ -1,5 +1,5 @@
 import path from "node:path"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
@@ -9,7 +9,10 @@ import {
   APP_STATE_SYNC_DATABASE_FILENAME,
   APP_STATE_SYNC_DIRECTORY,
 } from "../config/root"
+import { UsageError } from "../core/errors"
 import { assertPathInsideRoot } from "../platform/path-safety"
+import { replaceFileAtomically } from "../storage/atomic-replace"
+import { ensureManagedRoot } from "../storage/root-layout"
 
 const SQL_WASM_FILENAME = "sql-wasm.wasm"
 const executableAdjacentSqlWasmPath = path.join(path.dirname(process.execPath), SQL_WASM_FILENAME)
@@ -72,6 +75,7 @@ export function getSyncDatabasePath(rootPath: string): string {
 }
 
 function openSyncDatabase(rootPath: string): SyncDatabaseHandle {
+  ensureManagedRoot(rootPath)
   const syncDatabasePath = getSyncDatabasePath(rootPath)
   mkdirSync(path.dirname(syncDatabasePath), { recursive: true })
 
@@ -89,7 +93,67 @@ function openSyncDatabase(rootPath: string): SyncDatabaseHandle {
 }
 
 function saveSyncDatabase(handle: SyncDatabaseHandle): void {
-  writeFileSync(handle.syncDatabasePath, handle.db.export())
+  const syncDirectoryPath = path.dirname(handle.syncDatabasePath)
+  const temporaryPath = path.join(syncDirectoryPath, `${path.basename(handle.syncDatabasePath)}.tmp-${process.pid}-${Date.now()}`)
+
+  try {
+    writeFileSync(temporaryPath, handle.db.export())
+    fsyncFileBestEffort(temporaryPath)
+    replaceFileAtomically(temporaryPath, handle.syncDatabasePath)
+    fsyncDirectoryBestEffort(syncDirectoryPath)
+  } catch (error) {
+    rmSync(temporaryPath, { force: true })
+    throw error
+  }
+}
+
+function fsyncFileBestEffort(filePath: string): void {
+  let fd: number | null = null
+  try {
+    fd = openSync(filePath, "r")
+    fsyncSync(fd)
+  } catch {
+    // Best-effort durability: some filesystems/platforms may reject fsync.
+  } finally {
+    if (fd !== null) {
+      closeSync(fd)
+    }
+  }
+}
+
+function fsyncDirectoryBestEffort(directoryPath: string): void {
+  let fd: number | null = null
+  try {
+    fd = openSync(directoryPath, "r")
+    fsyncSync(fd)
+  } catch {
+    // Best-effort durability: directory fsync is not portable across all platforms.
+  } finally {
+    if (fd !== null) {
+      closeSync(fd)
+    }
+  }
+}
+
+function readMetadataValue(db: InstanceType<typeof SQL.Database>, key: string): string | null {
+  const rows = db.exec("SELECT value FROM sync_meta WHERE key = ?", [key])[0]?.values ?? []
+  const value = rows[0]?.[0]
+
+  return typeof value === "string" ? value : null
+}
+
+function ensureMetadataValue(db: InstanceType<typeof SQL.Database>, key: string, value: string): void {
+  const existingValue = readMetadataValue(db, key)
+
+  if (existingValue !== null && existingValue !== value) {
+    throw new UsageError(`Sync database ${key} mismatch.`, {
+      hint: `Expected ${key} '${existingValue}', but received '${value}'. Use a different BlueNote root or reset sync state deliberately.`,
+    })
+  }
+
+  if (existingValue === null) {
+    db.run("INSERT INTO sync_meta (key, value) VALUES (?, ?)", [key, value])
+  }
 }
 
 function bootstrapSyncSchema(handle: SyncDatabaseHandle, options: EnsureSyncDatabaseOptions): void {
@@ -176,19 +240,9 @@ function bootstrapSyncSchema(handle: SyncDatabaseHandle, options: EnsureSyncData
       )
     `)
 
-    const upsertMeta = db.prepare(`
-      INSERT INTO sync_meta (key, value)
-      VALUES (?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `)
-
-    try {
-      upsertMeta.run(["schemaVersion", String(SYNC_SCHEMA_VERSION)])
-      upsertMeta.run(["workspaceId", options.workspaceId])
-      upsertMeta.run(["role", options.role])
-    } finally {
-      upsertMeta.free()
-    }
+    ensureMetadataValue(db, "schemaVersion", String(SYNC_SCHEMA_VERSION))
+    ensureMetadataValue(db, "workspaceId", options.workspaceId)
+    ensureMetadataValue(db, "role", options.role)
 
     db.run("COMMIT")
   } catch (error) {
