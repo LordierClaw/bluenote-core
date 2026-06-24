@@ -114,14 +114,27 @@ function redactParams(rawValue: string): { value: string; changed: boolean } {
   return { value: changed ? params.toString() : rawValue, changed }
 }
 
+function redactFragment(rawValue: string): string {
+  const queryStart = rawValue.indexOf("?")
+  if (queryStart !== -1) {
+    const route = rawValue.slice(0, queryStart + 1)
+    const routeParams = redactParams(rawValue.slice(queryStart + 1))
+    if (routeParams.changed) {
+      return `${route}${routeParams.value}`
+    }
+  }
+
+  const params = redactParams(rawValue)
+  return params.changed ? params.value : rawValue
+}
+
 function redactUrl(rawValue: string): string | undefined {
   try {
     const parsed = new URL(rawValue)
     const query = redactParams(parsed.search.startsWith("?") ? parsed.search.slice(1) : parsed.search)
 
     const fragment = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash
-    const fragmentParams = redactParams(fragment)
-    const redactedFragment = fragmentParams.changed ? fragmentParams.value : fragment
+    const redactedFragment = redactFragment(fragment)
 
     const userInfo = parsed.username !== "" || parsed.password !== "" ? `${redacted}@` : ""
     return `${parsed.protocol}//${userInfo}${parsed.host}${parsed.pathname}${query.value === "" ? "" : `?${query.value}`}${redactedFragment === "" ? "" : `#${redactedFragment}`}`

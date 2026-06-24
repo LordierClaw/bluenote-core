@@ -100,6 +100,16 @@ describe("sync log", () => {
       "https://sync.example.test/callback#access_token=%5Bredacted%5D&id_token=%5Bredacted%5D&safe=value",
     )
 
+    assert.equal(
+      redactSyncLogValue("https://sync.example.test/callback#/oauth?code=AUTH-CODE&safe=1"),
+      "https://sync.example.test/callback#/oauth?code=%5Bredacted%5D&safe=1",
+    )
+
+    assert.equal(
+      redactSyncLogValue("https://sync.example.test/callback#/oauth?key=API-KEY&auth=AUTH-SECRET&safe=1"),
+      "https://sync.example.test/callback#/oauth?key=%5Bredacted%5D&auth=%5Bredacted%5D&safe=1",
+    )
+
     assert.deepEqual(redactSyncLogValue({
       noteBody: "Do not leak note body.",
       rawRequest: { url: "https://example.test/?safe=1", payload: "Do not leak payload." },
