@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import {
   createSyncHttpTransport,
   createSyncHttpHandlers,
+  createHttpSyncServerHandler,
   redactSyncHttpUrl,
   type SyncHttpFetch,
   type SyncHttpRequest,
@@ -210,5 +211,50 @@ describe("sync HTTP transport", () => {
         return true
       },
     )
+  })
+
+  test("redacts credentials when the fetch implementation throws", async () => {
+    const fetch: SyncHttpFetch = async (input) => {
+      throw new Error(`request to ${input.toString()} failed with raw network error`)
+    }
+    const transport = createSyncHttpTransport({ baseUrl: "https://user:pass@example.invalid/sync?token=abc", fetch })
+
+    await assert.rejects(
+      () => transport.pull({ workspaceId: "workspace-a", sinceSequence: 0, limit: 10 }),
+      (error: unknown) => {
+        assert(error instanceof Error)
+        assert.match(error.message, /https:\/\/\[redacted\]@example\.invalid\/sync\/sync\/v1\/changes\/pull\?token=%5Bredacted%5D/)
+        assert.equal(error.message.includes("user:pass"), false)
+        assert.equal(error.message.includes("token=abc"), false)
+        return true
+      },
+    )
+  })
+
+  test("server handler alias is Node 16 safe and does not require global Request or Response", async () => {
+    const previousRequest = globalThis.Request
+    const previousResponse = globalThis.Response
+    try {
+      Reflect.deleteProperty(globalThis, "Request")
+      Reflect.deleteProperty(globalThis, "Response")
+      const handlers = createHttpSyncServerHandler({
+        service: {
+          getChanges(request) {
+            return { workspaceId: request.workspaceId, fromSequence: request.sinceSequence, toSequence: request.sinceSequence, hasMore: false, changes: [] }
+          },
+          acceptPush() {
+            return { accepted: [], replacedByServer: [], rejected: [], serverSequence: 0 }
+          },
+          downloadNoteBody(noteId) {
+            return { workspaceId: "workspace-a", noteId, body: "Body" }
+          },
+        },
+      })
+
+      assert.deepEqual(await handlers.handle({ method: "GET", path: "/sync/v1/status", headers: {} }), { status: 200, body: { ok: true }, headers: { "content-type": "application/json" } })
+    } finally {
+      Object.defineProperty(globalThis, "Request", { value: previousRequest, configurable: true, writable: true })
+      Object.defineProperty(globalThis, "Response", { value: previousResponse, configurable: true, writable: true })
+    }
   })
 })

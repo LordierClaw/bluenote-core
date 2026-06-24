@@ -7,6 +7,7 @@ export interface CreateSyncHttpTransportOptions {
     fetch?: SyncHttpFetch;
 }
 export interface SyncHttpTransport {
+    /** Async HTTP adapter for daemon/network use. The in-process core SyncTransport remains synchronous. */
     pull(request: PullChangesRequest): Promise<PullChangesResponse>;
     push(request: PushRequest & {
         noteBodies?: Record<string, string>;
@@ -56,7 +57,7 @@ export interface SyncHttpResponse {
 export interface SyncHttpHandlers {
     handle(request: SyncHttpRequest): Promise<SyncHttpResponse>;
 }
-export type HttpSyncServerHandler = (request: Request) => Promise<Response>;
+export type HttpSyncServerHandler = SyncHttpHandlers;
 export declare function redactSyncHttpUrl(rawUrl: string | URL): string;
 export declare const redactSyncUrl: typeof redactSyncHttpUrl;
 export declare function createSyncHttpTransport(options: CreateSyncHttpTransportOptions): SyncHttpTransport;

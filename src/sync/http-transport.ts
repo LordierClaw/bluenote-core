@@ -29,6 +29,7 @@ export interface CreateSyncHttpTransportOptions {
 }
 
 export interface SyncHttpTransport {
+  /** Async HTTP adapter for daemon/network use. The in-process core SyncTransport remains synchronous. */
   pull(request: PullChangesRequest): Promise<PullChangesResponse>
   push(request: PushRequest & { noteBodies?: Record<string, string> }): Promise<PushResponse>
   uploadNoteBody(request: UploadNoteBodyRequest): Promise<UploadNoteBodyResponse>
@@ -72,7 +73,7 @@ export interface SyncHttpHandlers {
   handle(request: SyncHttpRequest): Promise<SyncHttpResponse>
 }
 
-export type HttpSyncServerHandler = (request: Request) => Promise<Response>
+export type HttpSyncServerHandler = SyncHttpHandlers
 
 type JsonValidator<T> = (value: unknown) => value is T
 
@@ -159,7 +160,12 @@ async function parseJsonResponse<T>(response: Response, url: string, validate: J
 
 async function requestJson<T>(fetchImpl: SyncHttpFetch, baseUrl: string, endpoint: string, init: RequestInit, validate: JsonValidator<T>, label: string): Promise<T> {
   const url = joinBaseUrl(baseUrl, endpoint)
-  const response = await fetchImpl(url, init)
+  let response: Response
+  try {
+    response = await fetchImpl(url, init)
+  } catch (error) {
+    throw new UsageError(`Sync HTTP ${label} request failed for ${redactSyncHttpUrl(logUrlWithBaseSecrets(baseUrl, url))}.`, { cause: error })
+  }
   return parseJsonResponse(response, logUrlWithBaseSecrets(baseUrl, url), validate, label)
 }
 
@@ -281,31 +287,9 @@ export function createSyncHttpHandlers(service: SyncHttpService): SyncHttpHandle
   }
 }
 
-function responseFromHandler(response: SyncHttpResponse): Response {
-  return new Response(JSON.stringify(response.body), { status: response.status, headers: response.headers })
-}
-
-async function requestToHandlerRequest(request: Request): Promise<SyncHttpRequest> {
-  const url = new URL(request.url)
-  let body: unknown = undefined
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    try {
-      body = await request.json()
-    } catch {
-      body = undefined
-    }
-  }
-  const headers: Record<string, string> = {}
-  request.headers.forEach((value, key) => {
-    headers[key] = value
-  })
-  return { method: request.method, path: url.pathname, body, headers }
-}
-
 export function createHttpSyncServerHandler(options: CreateHttpSyncServerHandlerOptions): HttpSyncServerHandler {
   const service = options.status === undefined ? options.service : { ...options.service, status: options.status }
-  const handlers = createSyncHttpHandlers(service)
-  return async (request) => responseFromHandler(await handlers.handle(await requestToHandlerRequest(request)))
+  return createSyncHttpHandlers(service)
 }
 
 export function isSyncHttpRequestBody(value: unknown): Record<string, unknown> {

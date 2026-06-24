@@ -76,7 +76,13 @@ async function parseJsonResponse(response, url, validate, label) {
 }
 async function requestJson(fetchImpl, baseUrl, endpoint, init, validate, label) {
     const url = joinBaseUrl(baseUrl, endpoint);
-    const response = await fetchImpl(url, init);
+    let response;
+    try {
+        response = await fetchImpl(url, init);
+    }
+    catch (error) {
+        throw new UsageError(`Sync HTTP ${label} request failed for ${redactSyncHttpUrl(logUrlWithBaseSecrets(baseUrl, url))}.`, { cause: error });
+    }
     return parseJsonResponse(response, logUrlWithBaseSecrets(baseUrl, url), validate, label);
 }
 function jsonPostInit(body) {
@@ -188,30 +194,9 @@ export function createSyncHttpHandlers(service) {
         },
     };
 }
-function responseFromHandler(response) {
-    return new Response(JSON.stringify(response.body), { status: response.status, headers: response.headers });
-}
-async function requestToHandlerRequest(request) {
-    const url = new URL(request.url);
-    let body = undefined;
-    if (request.method !== "GET" && request.method !== "HEAD") {
-        try {
-            body = await request.json();
-        }
-        catch {
-            body = undefined;
-        }
-    }
-    const headers = {};
-    request.headers.forEach((value, key) => {
-        headers[key] = value;
-    });
-    return { method: request.method, path: url.pathname, body, headers };
-}
 export function createHttpSyncServerHandler(options) {
     const service = options.status === undefined ? options.service : { ...options.service, status: options.status };
-    const handlers = createSyncHttpHandlers(service);
-    return async (request) => responseFromHandler(await handlers.handle(await requestToHandlerRequest(request)));
+    return createSyncHttpHandlers(service);
 }
 export function isSyncHttpRequestBody(value) {
     return assertObject(value, "Sync HTTP request");
