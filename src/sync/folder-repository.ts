@@ -1,4 +1,4 @@
-import { ensureSyncDatabase, openSyncDatabase, saveSyncDatabase, type EnsureSyncDatabaseOptions } from "./sync-db"
+import { type EnsureSyncDatabaseOptions, withSyncDatabase } from "./sync-db"
 
 export interface FolderInput {
   relativePath: string
@@ -22,10 +22,7 @@ export interface FolderRepository {
 export function createFolderRepository(rootPath: string, dbIdentity: EnsureSyncDatabaseOptions): FolderRepository {
   return {
     upsertFolder(folder) {
-      ensureSyncDatabase(rootPath, dbIdentity)
-      const handle = openSyncDatabase(rootPath)
-
-      try {
+      withSyncDatabase(rootPath, dbIdentity, (handle) => {
         handle.db.run(
           `
           INSERT INTO folders (relativePath, createdAt, updatedAt, deletedAt)
@@ -37,17 +34,11 @@ export function createFolderRepository(rootPath: string, dbIdentity: EnsureSyncD
         `,
           [folder.relativePath, folder.createdAt, folder.updatedAt, folder.deletedAt ?? null],
         )
-        saveSyncDatabase(handle)
-      } finally {
-        handle.db.close()
-      }
+      }, { save: true })
     },
 
     listFolders() {
-      ensureSyncDatabase(rootPath, dbIdentity)
-      const handle = openSyncDatabase(rootPath)
-
-      try {
+      return withSyncDatabase(rootPath, dbIdentity, (handle) => {
         const rows =
           handle.db.exec(
             `
@@ -63,9 +54,7 @@ export function createFolderRepository(rootPath: string, dbIdentity: EnsureSyncD
           updatedAt: String(row[2]),
           deletedAt: typeof row[3] === "string" ? row[3] : null,
         }))
-      } finally {
-        handle.db.close()
-      }
+      })
     },
   }
 }

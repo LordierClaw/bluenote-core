@@ -1,5 +1,5 @@
 import path from "node:path"
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
@@ -17,6 +17,7 @@ import { ensureManagedRoot } from "../storage/root-layout"
 const SQL_WASM_FILENAME = "sql-wasm.wasm"
 const executableAdjacentSqlWasmPath = path.join(path.dirname(process.execPath), SQL_WASM_FILENAME)
 const projectSqlWasmPath = path.resolve("node_modules", "sql.js", "dist", SQL_WASM_FILENAME)
+const SYNC_DB_LOCK_STALE_AFTER_MS = 10 * 60 * 1000
 
 let resolvedSqlWasmPath: string | null = null
 try {
@@ -69,6 +70,15 @@ export interface SyncDatabaseHandle {
   syncDatabasePath: string
 }
 
+interface SyncDatabaseLockMetadata {
+  pid: number
+  acquiredAt: string
+}
+
+export interface WithSyncDatabaseOptions {
+  save?: boolean
+}
+
 export function getSyncDatabasePath(rootPath: string): string {
   const normalizedRootPath = path.resolve(rootPath)
   const syncDirectoryPath = assertPathInsideRoot(normalizedRootPath, path.join(normalizedRootPath, APP_STATE_SYNC_DIRECTORY))
@@ -76,7 +86,7 @@ export function getSyncDatabasePath(rootPath: string): string {
   return assertPathInsideRoot(syncDirectoryPath, path.join(syncDirectoryPath, APP_STATE_SYNC_DATABASE_FILENAME))
 }
 
-export function openSyncDatabase(rootPath: string): SyncDatabaseHandle {
+function openSyncDatabase(rootPath: string): SyncDatabaseHandle {
   ensureManagedRoot(rootPath)
   const syncDatabasePath = getSyncDatabasePath(rootPath)
   mkdirSync(path.dirname(syncDatabasePath), { recursive: true })
@@ -94,7 +104,7 @@ export function openSyncDatabase(rootPath: string): SyncDatabaseHandle {
   }
 }
 
-export function saveSyncDatabase(handle: SyncDatabaseHandle): void {
+function saveSyncDatabase(handle: SyncDatabaseHandle): void {
   const syncDirectoryPath = path.dirname(handle.syncDatabasePath)
   const temporaryPath = path.join(syncDirectoryPath, `${path.basename(handle.syncDatabasePath)}.tmp-${process.pid}-${Date.now()}`)
 
@@ -106,6 +116,105 @@ export function saveSyncDatabase(handle: SyncDatabaseHandle): void {
   } catch (error) {
     rmSync(temporaryPath, { force: true })
     throw error
+  }
+}
+
+function getSyncDatabaseLockPath(syncDatabasePath: string): string {
+  return `${syncDatabasePath}.lock`
+}
+
+function getSyncDatabaseLockMetadataPath(lockPath: string): string {
+  return path.join(lockPath, "lock.json")
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false
+  }
+
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? (error as NodeJS.ErrnoException).code : undefined
+    return code === "EPERM"
+  }
+}
+
+function readSyncDatabaseLockMetadata(lockPath: string): SyncDatabaseLockMetadata | null {
+  try {
+    const parsed = JSON.parse(readFileSync(getSyncDatabaseLockMetadataPath(lockPath), "utf8")) as Partial<SyncDatabaseLockMetadata>
+    if (typeof parsed.pid === "number" && typeof parsed.acquiredAt === "string") {
+      return { pid: parsed.pid, acquiredAt: parsed.acquiredAt }
+    }
+  } catch {
+    // Missing or malformed metadata is handled by the directory mtime fallback.
+  }
+
+  return null
+}
+
+function isStaleSyncDatabaseLock(lockPath: string, now = Date.now()): boolean {
+  const metadata = readSyncDatabaseLockMetadata(lockPath)
+  if (metadata) {
+    const acquiredAt = Date.parse(metadata.acquiredAt)
+    return !isProcessAlive(metadata.pid) || (!Number.isNaN(acquiredAt) && now - acquiredAt > SYNC_DB_LOCK_STALE_AFTER_MS)
+  }
+
+  try {
+    return now - statSync(lockPath).mtimeMs > SYNC_DB_LOCK_STALE_AFTER_MS
+  } catch {
+    return false
+  }
+}
+
+function writeSyncDatabaseLockMetadata(lockPath: string): void {
+  writeFileSync(getSyncDatabaseLockMetadataPath(lockPath), `${JSON.stringify({
+    pid: process.pid,
+    acquiredAt: new Date().toISOString(),
+  }, null, 2)}\n`, "utf8")
+}
+
+function acquireSyncDatabaseLock(syncDatabasePath: string): () => void {
+  const lockPath = getSyncDatabaseLockPath(syncDatabasePath)
+  const relativePath = path.basename(lockPath)
+
+  try {
+    mkdirSync(path.dirname(lockPath), { recursive: true })
+    mkdirSync(lockPath)
+    writeSyncDatabaseLockMetadata(lockPath)
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? (error as NodeJS.ErrnoException).code : undefined
+    if (code === "EEXIST" && isStaleSyncDatabaseLock(lockPath)) {
+      try {
+        rmSync(lockPath, { recursive: true, force: true })
+        mkdirSync(lockPath)
+        writeSyncDatabaseLockMetadata(lockPath)
+      } catch (recoveryError) {
+        throw new UsageError(`Could not recover stale sync database lock '${relativePath}'.`, {
+          hint: "Retry after any other BlueNote sync operation finishes, or remove the stale .data/sync/sync.sqlite.lock directory if no BlueNote process is running.",
+          cause: recoveryError,
+        })
+      }
+    } else if (code === "EEXIST") {
+      throw new UsageError(`Sync database '${relativePath}' is busy.`, {
+        hint: "Retry after any other BlueNote sync operation finishes.",
+        cause: error,
+      })
+    } else {
+      throw new UsageError(`Could not lock sync database '${relativePath}'.`, {
+        hint: "Ensure BLUENOTE_ROOT points to a writable directory path.",
+        cause: error,
+      })
+    }
+  }
+
+  return () => {
+    try {
+      rmSync(lockPath, { recursive: true, force: true })
+    } catch {
+      // Best-effort cleanup must not hide the original sync database operation error.
+    }
   }
 }
 
@@ -283,18 +392,36 @@ function bootstrapSyncSchema(handle: SyncDatabaseHandle, options: EnsureSyncData
   }
 }
 
-export function ensureSyncDatabase(rootPath: string, options: EnsureSyncDatabaseOptions): EnsureSyncDatabaseResult {
+export function withSyncDatabase<Result>(
+  rootPath: string,
+  identity: EnsureSyncDatabaseOptions,
+  operation: (handle: SyncDatabaseHandle) => Result,
+  options: WithSyncDatabaseOptions = {},
+): Result {
+  ensureManagedRoot(rootPath)
+  const syncDatabasePath = getSyncDatabasePath(rootPath)
+  const releaseLock = acquireSyncDatabaseLock(syncDatabasePath)
   const handle = openSyncDatabase(rootPath)
 
   try {
-    bootstrapSyncSchema(handle, options)
-    saveSyncDatabase(handle)
+    bootstrapSyncSchema(handle, identity)
+    const result = operation(handle)
+    if (options.save === true) {
+      saveSyncDatabase(handle)
+    }
+    return result
   } finally {
     handle.db.close()
+    releaseLock()
   }
+}
+
+export function ensureSyncDatabase(rootPath: string, options: EnsureSyncDatabaseOptions): EnsureSyncDatabaseResult {
+  const syncDatabasePath = getSyncDatabasePath(rootPath)
+  withSyncDatabase(rootPath, options, () => undefined, { save: true })
 
   return {
-    syncDatabasePath: handle.syncDatabasePath,
+    syncDatabasePath,
     schemaVersion: SYNC_SCHEMA_VERSION,
   }
 }

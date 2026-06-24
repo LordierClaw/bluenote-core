@@ -1,4 +1,4 @@
-import { ensureSyncDatabase, openSyncDatabase, saveSyncDatabase, type EnsureSyncDatabaseOptions } from "./sync-db"
+import { type EnsureSyncDatabaseOptions, withSyncDatabase } from "./sync-db"
 
 export interface TombstoneInput {
   entityType: string
@@ -28,10 +28,7 @@ export interface TombstoneRepository {
 export function createTombstoneRepository(rootPath: string, dbIdentity: EnsureSyncDatabaseOptions): TombstoneRepository {
   return {
     recordTombstone(tombstone) {
-      ensureSyncDatabase(rootPath, dbIdentity)
-      const handle = openSyncDatabase(rootPath)
-
-      try {
+      withSyncDatabase(rootPath, dbIdentity, (handle) => {
         handle.db.run(
           `
           INSERT INTO tombstones (
@@ -61,17 +58,11 @@ export function createTombstoneRepository(rootPath: string, dbIdentity: EnsureSy
             tombstone.previousTitle ?? null,
           ],
         )
-        saveSyncDatabase(handle)
-      } finally {
-        handle.db.close()
-      }
+      }, { save: true })
     },
 
     listTombstones() {
-      ensureSyncDatabase(rootPath, dbIdentity)
-      const handle = openSyncDatabase(rootPath)
-
-      try {
+      return withSyncDatabase(rootPath, dbIdentity, (handle) => {
         const rows =
           handle.db.exec(
             `
@@ -90,9 +81,7 @@ export function createTombstoneRepository(rootPath: string, dbIdentity: EnsureSy
           previousRelativePath: typeof row[5] === "string" ? row[5] : null,
           previousTitle: typeof row[6] === "string" ? row[6] : null,
         }))
-      } finally {
-        handle.db.close()
-      }
+      })
     },
   }
 }

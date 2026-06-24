@@ -1,10 +1,8 @@
 import {
-  ensureSyncDatabase,
-  openSyncDatabase,
   parseSyncMetadata,
-  saveSyncDatabase,
   serializeSyncMetadata,
   type EnsureSyncDatabaseOptions,
+  withSyncDatabase,
 } from "./sync-db"
 
 const STATUS_SUMMARY_KEY = "summary"
@@ -32,16 +30,14 @@ export interface SyncStatusRepository {
 export function createSyncStatusRepository(rootPath: string, dbIdentity: EnsureSyncDatabaseOptions): SyncStatusRepository {
   return {
     writeStatusSummary(summary) {
-      ensureSyncDatabase(rootPath, dbIdentity)
-      const handle = openSyncDatabase(rootPath)
-      const stored: StoredSyncStatusSummary = {
-        pendingCount: summary.pendingCount,
-        runningCount: summary.runningCount,
-        failedCount: summary.failedCount,
-        lastError: summary.lastError ?? null,
-      }
+      withSyncDatabase(rootPath, dbIdentity, (handle) => {
+        const stored: StoredSyncStatusSummary = {
+          pendingCount: summary.pendingCount,
+          runningCount: summary.runningCount,
+          failedCount: summary.failedCount,
+          lastError: summary.lastError ?? null,
+        }
 
-      try {
         handle.db.run(
           `
           INSERT INTO sync_status (key, value, updatedAt)
@@ -52,17 +48,11 @@ export function createSyncStatusRepository(rootPath: string, dbIdentity: EnsureS
         `,
           [STATUS_SUMMARY_KEY, serializeSyncMetadata(stored), summary.updatedAt],
         )
-        saveSyncDatabase(handle)
-      } finally {
-        handle.db.close()
-      }
+      }, { save: true })
     },
 
     readStatusSummary() {
-      ensureSyncDatabase(rootPath, dbIdentity)
-      const handle = openSyncDatabase(rootPath)
-
-      try {
+      return withSyncDatabase(rootPath, dbIdentity, (handle) => {
         const rows =
           handle.db.exec("SELECT value, updatedAt FROM sync_status WHERE key = ?", [STATUS_SUMMARY_KEY])[0]?.values ?? []
         const row = rows[0] as unknown[] | undefined
@@ -84,9 +74,7 @@ export function createSyncStatusRepository(rootPath: string, dbIdentity: EnsureS
           updatedAt: String(row[1]),
           lastError: typeof stored.lastError === "string" ? stored.lastError : null,
         }
-      } finally {
-        handle.db.close()
-      }
+      })
     },
   }
 }

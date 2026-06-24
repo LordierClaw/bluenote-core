@@ -2,7 +2,11 @@ import { test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
+import { readFileSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
+
+// @ts-expect-error sql.js does not ship TypeScript declarations in this project.
+import initSqlJs from "sql.js"
 
 import {
   createDirtyRecordRepository,
@@ -14,6 +18,7 @@ import {
 } from "../../../src"
 
 const dbIdentity: EnsureSyncDatabaseOptions = { role: "client", workspaceId: "workspace-123" }
+const SQL = await initSqlJs()
 
 async function withRoot<T>(prefix: string, callback: (rootPath: string) => T | Promise<T>): Promise<T> {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), prefix))
@@ -79,6 +84,44 @@ test("dirty repository clears accepted records", async () => {
       },
     ])
   })
+})
+
+test("dirty repository re-marking resets stale retry state", async () => {
+  await withRoot("bluenote-dirty-reset-", (rootPath) => {
+    const repository = createDirtyRecordRepository(rootPath, dbIdentity)
+
+    repository.markDirty({ entityType: "note", entityId: "note-1", dirtyType: "upsert", markedAt: "2026-01-01T00:00:00.000Z" })
+
+    const dbPath = path.join(rootPath, ".data", "sync", "sync.sqlite")
+    const db = new SQL.Database(readFileSync(dbPath))
+    try {
+      db.run("UPDATE dirty_records SET attempts = 4, lastError = 'network failed' WHERE entityType = 'note' AND entityId = 'note-1'")
+      writeFileSync(dbPath, db.export())
+    } finally {
+      db.close()
+    }
+
+    repository.markDirty({ entityType: "note", entityId: "note-1", dirtyType: "upsert", markedAt: "2026-01-01T00:02:00.000Z" })
+
+    assert.deepEqual(repository.listDirtyRecords(), [
+      {
+        entityType: "note",
+        entityId: "note-1",
+        dirtyType: "upsert",
+        markedAt: "2026-01-01T00:02:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: null,
+      },
+    ])
+  })
+})
+
+test("package root does not expose low-level sync database handles", async () => {
+  const core = await import("../../../src")
+
+  assert.equal("openSyncDatabase" in core, false)
+  assert.equal("saveSyncDatabase" in core, false)
 })
 
 test("tombstone repository records deleted notes and folders", async () => {

@@ -68,7 +68,19 @@ export * from "./storage/sidecar-schema"
 export * from "./storage/state-manifest"
 export * from "./sync/dirty-repository"
 export * from "./sync/folder-repository"
-export * from "./sync/sync-db"
+export {
+  ensureSyncDatabase,
+  getSyncDatabasePath,
+  SYNC_SCHEMA_VERSION,
+  serializeSyncMetadata,
+  parseSyncMetadata,
+} from "./sync/sync-db"
+export type {
+  EnsureSyncDatabaseOptions,
+  EnsureSyncDatabaseResult,
+  SyncDatabaseRole,
+  SyncJsonObject,
+} from "./sync/sync-db"
 export * from "./sync/status-repository"
 export * from "./sync/tombstone-repository"
 export * from "./search/contains-match"

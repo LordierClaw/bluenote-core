@@ -1,11 +1,9 @@
 import {
-  ensureSyncDatabase,
-  openSyncDatabase,
   parseSyncMetadata,
-  saveSyncDatabase,
   serializeSyncMetadata,
   type EnsureSyncDatabaseOptions,
   type SyncJsonObject,
+  withSyncDatabase,
 } from "./sync-db"
 
 export interface DirtyRecordInput {
@@ -35,10 +33,7 @@ export interface DirtyRecordRepository {
 export function createDirtyRecordRepository(rootPath: string, dbIdentity: EnsureSyncDatabaseOptions): DirtyRecordRepository {
   return {
     markDirty(record) {
-      ensureSyncDatabase(rootPath, dbIdentity)
-      const handle = openSyncDatabase(rootPath)
-
-      try {
+      withSyncDatabase(rootPath, dbIdentity, (handle) => {
         handle.db.run(
           `
           INSERT INTO dirty_records (entityType, entityId, dirtyType, markedAt, attempts, lastError, metadataJson)
@@ -46,21 +41,17 @@ export function createDirtyRecordRepository(rootPath: string, dbIdentity: Ensure
           ON CONFLICT(entityType, entityId) DO UPDATE SET
             dirtyType = excluded.dirtyType,
             markedAt = excluded.markedAt,
+            attempts = 0,
+            lastError = NULL,
             metadataJson = excluded.metadataJson
         `,
           [record.entityType, record.entityId, record.dirtyType, record.markedAt, serializeSyncMetadata(record.metadata)],
         )
-        saveSyncDatabase(handle)
-      } finally {
-        handle.db.close()
-      }
+      }, { save: true })
     },
 
     listDirtyRecords() {
-      ensureSyncDatabase(rootPath, dbIdentity)
-      const handle = openSyncDatabase(rootPath)
-
-      try {
+      return withSyncDatabase(rootPath, dbIdentity, (handle) => {
         const rows =
           handle.db.exec(
             `
@@ -79,21 +70,13 @@ export function createDirtyRecordRepository(rootPath: string, dbIdentity: Ensure
           lastError: typeof row[5] === "string" ? row[5] : null,
           metadata: parseSyncMetadata(typeof row[6] === "string" ? row[6] : null),
         }))
-      } finally {
-        handle.db.close()
-      }
+      })
     },
 
     clearDirtyRecord(entityType, entityId) {
-      ensureSyncDatabase(rootPath, dbIdentity)
-      const handle = openSyncDatabase(rootPath)
-
-      try {
+      withSyncDatabase(rootPath, dbIdentity, (handle) => {
         handle.db.run("DELETE FROM dirty_records WHERE entityType = ? AND entityId = ?", [entityType, entityId])
-        saveSyncDatabase(handle)
-      } finally {
-        handle.db.close()
-      }
+      }, { save: true })
     },
   }
 }
