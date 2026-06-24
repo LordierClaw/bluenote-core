@@ -42,6 +42,7 @@ export function isSyncChangeView(value) {
         isString(value.changeType) &&
         isNonNegativeInteger(value.serverRevision) &&
         isString(value.changedAt) &&
+        optionalString(value, "sourceReplicaId") &&
         optionalString(value, "title") &&
         optionalString(value, "relativePath") &&
         optionalBoolean(value, "bodyAvailable") &&

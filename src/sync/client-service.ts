@@ -406,6 +406,10 @@ function clearAcceptedDirty(rootPath: string, identity: EnsureSyncDatabaseOption
   }
 }
 
+function isOwnEcho(change: SyncChangeView, replicaId: string): boolean {
+  return change.sourceReplicaId === replicaId
+}
+
 export function createSyncClientService(options: CreateSyncClientServiceOptions): SyncClientService {
   const rootPath = path.resolve(options.rootPath)
   const replicaId = options.replicaId ?? "local"
@@ -423,6 +427,9 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
       for (;;) {
         const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit })
         for (const change of response.changes) {
+          if (isOwnEcho(change, replicaId)) {
+            continue
+          }
           if (applyPulledChange(rootPath, identity, change, options.transport)) {
             dirty.clearDirtyRecord(change.entityType, change.entityId)
             needsRebuild = true
@@ -449,6 +456,9 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
         while (pushResponse.serverSequence > sinceSequence) {
           const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit })
           for (const change of response.changes) {
+            if (isOwnEcho(change, replicaId)) {
+              continue
+            }
             if (applyPulledChange(rootPath, identity, change, options.transport)) {
               dirty.clearDirtyRecord(change.entityType, change.entityId)
               needsRebuild = true

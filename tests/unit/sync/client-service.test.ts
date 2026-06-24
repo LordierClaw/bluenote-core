@@ -135,7 +135,7 @@ describe("sync client service", () => {
         dirty.clearDirtyRecord(record.entityType, record.entityId)
       }
 
-      core.notes.archive(note.key, { clock: { now: () => new Date("2026-06-24T02:00:00.000Z") } })
+      const archived = core.notes.archive(note.key, { clock: { now: () => new Date("2026-06-24T02:00:00.000Z") } })
       assert.deepEqual(dirty.listDirtyRecords().map((record) => ({
         entityType: record.entityType,
         entityId: record.entityId,
@@ -155,8 +155,37 @@ describe("sync client service", () => {
         },
       ])
 
-      const transport = makeTransport()
-      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 1, pulled: 0 })
+      let pullCount = 0
+      const transport = makeTransport({
+        push: (request) => ({
+          accepted: request.records.map((record) => ({ entityType: record.entityType, entityId: record.entityId, serverRevision: 1 })),
+          replacedByServer: [],
+          rejected: [],
+          serverSequence: 1,
+        }),
+        pull: (request) => {
+          pullCount += 1
+          return {
+            workspaceId: request.workspaceId,
+            fromSequence: request.sinceSequence,
+            toSequence: pullCount === 1 ? 0 : 1,
+            hasMore: false,
+            changes: pullCount === 1 ? [] : [{
+              sequence: 1,
+              entityType: "note",
+              entityId: note.noteId,
+              changeType: "delete",
+              serverRevision: 1,
+              changedAt: "2026-06-24T02:00:01.000Z",
+              relativePath: note.relativePath,
+              bodyAvailable: false,
+              sourceReplicaId: replicaId,
+              metadata: { previousRelativePath: note.relativePath, previousTitle: note.title },
+            }],
+          }
+        },
+      })
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 1, pulled: 1 })
       assert.equal(transport.pushes.length, 1)
       assert.equal(transport.pushes[0].records.length, 1)
       assert.deepEqual(transport.pushes[0].records[0], {
@@ -173,6 +202,7 @@ describe("sync client service", () => {
       })
       assert.equal(transport.pushes[0].noteBodies, undefined)
       assert.deepEqual(dirty.listDirtyRecords(), [])
+      assert.equal(readFileSync(path.join(rootPath, archived.relativePath), "utf8"), "Archive me remotely.\n")
     })
   })
 

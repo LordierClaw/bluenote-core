@@ -535,6 +535,7 @@ function insertServerChange(handle: SyncDatabaseHandle, workspaceId: string, cha
 function toChangeView(row: unknown[]): SyncChangeView {
   const title = typeof row[6] === "string" ? row[6] : undefined
   const relativePath = typeof row[7] === "string" ? row[7] : undefined
+  const sourceReplicaId = typeof row[10] === "string" ? row[10] : undefined
   return {
     sequence: Number(row[0]),
     entityType: String(row[1]) as SyncChangeEntityType,
@@ -542,6 +543,7 @@ function toChangeView(row: unknown[]): SyncChangeView {
     changeType: String(row[3]),
     serverRevision: Number(row[4]),
     changedAt: String(row[5]),
+    ...(sourceReplicaId === undefined ? {} : { sourceReplicaId }),
     ...(title === undefined ? {} : { title }),
     ...(relativePath === undefined ? {} : { relativePath }),
     bodyAvailable: row[8] === 1,
@@ -718,7 +720,7 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
       return withSyncDatabase(rootPath, dbIdentity, (handle) => {
         const rows = handle.db.exec(
           `
-            SELECT sequence, entityType, entityId, changeType, serverRevision, changedAt, title, relativePath, bodyAvailable, metadataJson
+            SELECT sequence, entityType, entityId, changeType, serverRevision, changedAt, title, relativePath, bodyAvailable, metadataJson, sourceReplicaId
             FROM server_changes AS changes
             WHERE workspaceId = ? AND sequence > ?
               AND NOT EXISTS (

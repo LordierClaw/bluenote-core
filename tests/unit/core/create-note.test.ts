@@ -118,23 +118,22 @@ test("createNote marks canonical destination folder dirty in sync-client mode", 
   })
 })
 
-test("createNote surfaces sync dirty bookkeeping failures instead of dropping dirty records", async () => {
+test("createNote still writes the note if sync dirty bookkeeping is temporarily unavailable", async () => {
   await withTempRoot("bluenote-create-note-sync-dirty-failure-", async (rootPath) => {
     await enableSyncClientMode(rootPath)
     await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
 
-    assert.throws(
-      () => createNote({
-        override: rootPath,
-        type: "draft",
-        title: "Retry Later",
-        body: "Local write must not silently drop dirty tracking.\n",
-        noteIdGenerator: () => "note_dirty_retry_later",
-        randomSource: () => 46655,
-        clock: fixedClock("2026-06-06T12:00:00.000Z"),
-      }),
-      /lock/i,
-    )
+    const created = createNote({
+      override: rootPath,
+      type: "draft",
+      title: "Retry Later",
+      body: "Local write must succeed.\n",
+      noteIdGenerator: () => "note_dirty_retry_later",
+      randomSource: () => 46655,
+      clock: fixedClock("2026-06-06T12:00:00.000Z"),
+    })
+
+    assert.equal(await readFile(created.notePath, "utf8"), "Local write must succeed.\n")
   })
 })
 

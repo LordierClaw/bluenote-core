@@ -20,6 +20,7 @@ export interface SyncChangeView {
     changeType: string;
     serverRevision: number;
     changedAt: string;
+    sourceReplicaId?: string;
     title?: string;
     relativePath?: string;
     bodyAvailable?: boolean;

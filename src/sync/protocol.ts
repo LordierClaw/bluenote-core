@@ -23,6 +23,7 @@ export interface SyncChangeView {
   changeType: string
   serverRevision: number
   changedAt: string
+  sourceReplicaId?: string
   title?: string
   relativePath?: string
   bodyAvailable?: boolean
@@ -167,6 +168,7 @@ export function isSyncChangeView(value: unknown): value is SyncChangeView {
     isString(value.changeType) &&
     isNonNegativeInteger(value.serverRevision) &&
     isString(value.changedAt) &&
+    optionalString(value, "sourceReplicaId") &&
     optionalString(value, "title") &&
     optionalString(value, "relativePath") &&
     optionalBoolean(value, "bodyAvailable") &&

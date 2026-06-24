@@ -47,44 +47,44 @@ export function recordSyncMutationBestEffort(rootPath, input) {
     if (runtimeMode === null) {
         return;
     }
-    const identity = { role: "client", workspaceId: runtimeMode.workspaceId };
-    const dirtyRepository = createDirtyRecordRepository(rootPath, identity);
-    const folderRepository = createFolderRepository(rootPath, identity);
-    const tombstoneRepository = createTombstoneRepository(rootPath, identity);
-    for (const folder of input.folders ?? []) {
-        const relativePath = normalizeFolderRelativePath(folder.relativePath);
-        folderRepository.upsertFolder({
-            relativePath,
-            createdAt: folder.markedAt,
-            updatedAt: folder.markedAt,
-        });
-        dirtyRepository.markDirty({
-            entityType: "folder",
-            entityId: relativePath,
-            dirtyType: "upsert",
-            markedAt: folder.markedAt,
-            metadata: { relativePath },
-        });
-    }
-    for (const tombstone of input.tombstones ?? []) {
-        tombstoneRepository.recordTombstone({
-            entityType: "note",
-            entityId: tombstone.entityId,
-            deletedAt: tombstone.deletedAt,
-            previousRelativePath: tombstone.previousRelativePath,
-            previousTitle: tombstone.previousTitle,
-        });
-    }
-    for (const note of input.notes ?? []) {
-        dirtyRepository.markDirty({
-            entityType: "note",
-            entityId: note.entityId,
-            dirtyType: note.dirtyType ?? "upsert",
-            markedAt: note.markedAt,
-            metadata: note.metadata,
-        });
-    }
     try {
+        const identity = { role: "client", workspaceId: runtimeMode.workspaceId };
+        const dirtyRepository = createDirtyRecordRepository(rootPath, identity);
+        const folderRepository = createFolderRepository(rootPath, identity);
+        const tombstoneRepository = createTombstoneRepository(rootPath, identity);
+        for (const folder of input.folders ?? []) {
+            const relativePath = normalizeFolderRelativePath(folder.relativePath);
+            folderRepository.upsertFolder({
+                relativePath,
+                createdAt: folder.markedAt,
+                updatedAt: folder.markedAt,
+            });
+            dirtyRepository.markDirty({
+                entityType: "folder",
+                entityId: relativePath,
+                dirtyType: "upsert",
+                markedAt: folder.markedAt,
+                metadata: { relativePath },
+            });
+        }
+        for (const tombstone of input.tombstones ?? []) {
+            tombstoneRepository.recordTombstone({
+                entityType: "note",
+                entityId: tombstone.entityId,
+                deletedAt: tombstone.deletedAt,
+                previousRelativePath: tombstone.previousRelativePath,
+                previousTitle: tombstone.previousTitle,
+            });
+        }
+        for (const note of input.notes ?? []) {
+            dirtyRepository.markDirty({
+                entityType: "note",
+                entityId: note.entityId,
+                dirtyType: note.dirtyType ?? "upsert",
+                markedAt: note.markedAt,
+                metadata: note.metadata,
+            });
+        }
         createSyncStatusRepository(rootPath, identity).writeStatusSummary({
             pendingCount: countPending(rootPath, runtimeMode.workspaceId),
             runningCount: 0,
@@ -94,7 +94,7 @@ export function recordSyncMutationBestEffort(rootPath, input) {
         });
     }
     catch {
-        // Non-critical status logging must not block the local mutation.
+        // Sync tracking is best-effort after local note mutations have already been persisted.
     }
 }
 //# sourceMappingURL=mutation-tracking.js.map
