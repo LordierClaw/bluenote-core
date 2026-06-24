@@ -31,7 +31,9 @@ export interface SyncHttpService {
         noteBodies?: Record<string, string>;
     }): PushResponse | Promise<PushResponse>;
     uploadNoteBody?(request: UploadNoteBodyRequest): UploadNoteBodyResponse | Promise<UploadNoteBodyResponse>;
-    downloadNoteBody(noteId: string): DownloadNoteBodyResponse | Promise<DownloadNoteBodyResponse>;
+    downloadNoteBody(noteId: string, request?: {
+        workspaceId?: string;
+    }): DownloadNoteBodyResponse | Promise<DownloadNoteBodyResponse>;
     status?(request?: {
         workspaceId?: string;
     }): Record<string, unknown> | SyncStatusView | Promise<Record<string, unknown> | SyncStatusView>;

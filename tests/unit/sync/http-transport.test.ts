@@ -70,11 +70,13 @@ function createRecordingFetch(): { fetch: SyncHttpFetch; calls: Array<{ url: str
 
     if (pathname.endsWith("/sync/v1/bodies/note-a")) {
       assert.equal(init.method, "GET")
+      assert.equal(new URL(url).searchParams.get("workspaceId"), "workspace-a")
       return jsonResponse({ workspaceId: "workspace-a", noteId: "note-a", contentHash: "sha256:def", byteLength: 6, body: "Server" })
     }
 
     if (pathname.endsWith("/sync/v1/status")) {
       assert.equal(init.method, "GET")
+      assert.equal(new URL(url).searchParams.get("workspaceId"), "workspace-a")
       return jsonResponse({ workspaceId: "workspace-a", ok: true })
     }
 
@@ -115,8 +117,8 @@ describe("sync HTTP transport", () => {
       noteBodies: { "note-a": "Body stays separate from change lists.\n" },
     }), { accepted: [{ entityType: "note", entityId: "note-a", serverRevision: 3 }], replacedByServer: [], rejected: [], serverSequence: 9 })
     assert.deepEqual(await transport.uploadNoteBody({ workspaceId: "workspace-a", replicaId: "replica-a", noteId: "note-a", contentHash: "sha256:abc", byteLength: 5, body: "Hello" }), { noteId: "note-a", contentHash: "sha256:abc", byteLength: 5, accepted: true })
-    assert.deepEqual(await transport.downloadNoteBody("note-a"), { workspaceId: "workspace-a", noteId: "note-a", contentHash: "sha256:def", byteLength: 6, body: "Server" })
-    assert.deepEqual(await transport.status(), { workspaceId: "workspace-a", ok: true })
+    assert.deepEqual(await transport.downloadNoteBody("note-a", { workspaceId: "workspace-a" }), { workspaceId: "workspace-a", noteId: "note-a", contentHash: "sha256:def", byteLength: 6, body: "Server" })
+    assert.deepEqual(await transport.status({ workspaceId: "workspace-a" }), { workspaceId: "workspace-a", ok: true })
 
     assert.deepEqual(calls.map((call) => [call.init.method, new URL(call.url).pathname]), [
       ["POST", "/base/sync/v1/changes/pull"],
@@ -136,6 +138,8 @@ describe("sync HTTP transport", () => {
     const pullRequests: PullChangesRequest[] = []
     const pushRequests: Array<PushRequest & { noteBodies?: Record<string, string> }> = []
     const uploads: UploadNoteBodyRequest[] = []
+    const downloads: Array<{ noteId: string; workspaceId?: string }> = []
+    const statuses: Array<{ workspaceId?: string } | undefined> = []
     const service: SyncHttpService = {
       getChanges(request) {
         pullRequests.push(request)
@@ -166,10 +170,12 @@ describe("sync HTTP transport", () => {
         uploads.push(request)
         return { noteId: request.noteId, contentHash: request.contentHash, byteLength: request.byteLength, accepted: true }
       },
-      downloadNoteBody(noteId) {
+      downloadNoteBody(noteId, request) {
+        downloads.push({ noteId, workspaceId: request?.workspaceId })
         return { workspaceId: "workspace-a", noteId, body: "Downloaded body.\n" }
       },
-      status() {
+      status(request) {
+        statuses.push(request)
         return { workspaceId: "workspace-a", ok: true }
       },
     }
@@ -189,11 +195,19 @@ describe("sync HTTP transport", () => {
     assert.equal(upload.status, 200)
     assert.equal(uploads.length, 1)
 
-    const download = await handlers.handle({ method: "GET", path: "/sync/v1/bodies/note-a", headers: {} })
+    const download = await handlers.handle({ method: "GET", path: "/sync/v1/bodies/note-a?workspaceId=workspace-a", headers: {} })
     assert.deepEqual(download.body, { workspaceId: "workspace-a", noteId: "note-a", body: "Downloaded body.\n" })
+    assert.deepEqual(downloads, [{ noteId: "note-a", workspaceId: "workspace-a" }])
 
-    const status = await handlers.handle({ method: "GET", path: "/sync/v1/status", headers: {} })
+    const status = await handlers.handle({ method: "GET", path: "/sync/v1/status?workspaceId=workspace-a", headers: {} })
     assert.deepEqual(status.body, { workspaceId: "workspace-a", ok: true })
+    assert.deepEqual(statuses, [{ workspaceId: "workspace-a" }])
+
+    const invalidPush = await handlers.handle({ method: "POST", path: "/sync/v1/changes/push", body: { workspaceId: "workspace-a", replicaId: "replica-a", baseSequence: 3, records: [], noteBodies: { "note-a": 123 } }, headers: {} })
+    assert.equal(invalidPush.status, 400)
+
+    const malformedDownload = await handlers.handle({ method: "GET", path: "/sync/v1/bodies/%E0%A4%A?workspaceId=workspace-a", headers: {} })
+    assert.equal(malformedDownload.status, 400)
   })
 
   test("redacts credentials and query tokens in URL helpers and HTTP errors", async () => {

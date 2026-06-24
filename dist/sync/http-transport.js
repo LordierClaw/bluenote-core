@@ -18,9 +18,10 @@ const secretQueryKeys = new Set([
 ]);
 function joinBaseUrl(baseUrl, endpoint) {
     const parsed = new URL(baseUrl);
+    const endpointUrl = new URL(endpoint, "http://bluenote.local");
     const basePath = parsed.pathname.replace(/\/+$/, "");
-    parsed.pathname = `${basePath}/${endpoint.replace(/^\/+/, "")}`;
-    parsed.search = "";
+    parsed.pathname = `${basePath}/${endpointUrl.pathname.replace(/^\/+/, "")}`;
+    parsed.search = endpointUrl.search;
     return parsed.toString();
 }
 function logUrlWithBaseSecrets(baseUrl, requestUrl) {
@@ -88,6 +89,13 @@ async function requestJson(fetchImpl, baseUrl, endpoint, init, validate, label) 
 function jsonPostInit(body) {
     return { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
+function endpointWithWorkspace(endpoint, options) {
+    if (options?.workspaceId === undefined) {
+        return endpoint;
+    }
+    const query = new URLSearchParams({ workspaceId: options.workspaceId });
+    return `${endpoint}?${query.toString()}`;
+}
 export function createSyncHttpTransport(options) {
     const fetchImpl = options.fetch ?? getDefaultFetch();
     const baseUrl = options.baseUrl;
@@ -101,11 +109,11 @@ export function createSyncHttpTransport(options) {
         uploadNoteBody(request) {
             return requestJson(fetchImpl, baseUrl, "/sync/v1/bodies/upload", jsonPostInit(request), isUploadNoteBodyResponse, "body upload");
         },
-        downloadNoteBody(noteId) {
-            return requestJson(fetchImpl, baseUrl, `/sync/v1/bodies/${encodeURIComponent(noteId)}`, { method: "GET" }, isDownloadNoteBodyResponse, "body download");
+        downloadNoteBody(noteId, options) {
+            return requestJson(fetchImpl, baseUrl, endpointWithWorkspace(`/sync/v1/bodies/${encodeURIComponent(noteId)}`, options), { method: "GET" }, isDownloadNoteBodyResponse, "body download");
         },
-        status() {
-            return requestJson(fetchImpl, baseUrl, "/sync/v1/status", { method: "GET" }, (value) => typeof value === "object" && value !== null && !Array.isArray(value), "status");
+        status(options) {
+            return requestJson(fetchImpl, baseUrl, endpointWithWorkspace("/sync/v1/status", options), { method: "GET" }, (value) => typeof value === "object" && value !== null && !Array.isArray(value), "status");
         },
         getStatus(options) {
             return this.status(options);
@@ -134,6 +142,14 @@ function normalizePath(path) {
     const [pathOnly] = path.split("?", 1);
     return pathOnly.replace(/\/+$/, "") || "/";
 }
+function workspaceFromPath(path) {
+    const queryStart = path.indexOf("?");
+    if (queryStart === -1) {
+        return undefined;
+    }
+    const workspaceId = new URLSearchParams(path.slice(queryStart + 1)).get("workspaceId") ?? undefined;
+    return workspaceId === undefined ? undefined : { workspaceId };
+}
 function noteIdFromBodyPath(path) {
     const prefix = "/sync/v1/bodies/";
     const normalized = normalizePath(path);
@@ -150,6 +166,15 @@ function methodNotAllowed() {
 }
 function badRequest(message) {
     return jsonResponse({ error: "bad-request", message }, 400);
+}
+function hasValidNoteBodies(value) {
+    if (value.noteBodies === undefined) {
+        return true;
+    }
+    if (typeof value.noteBodies !== "object" || value.noteBodies === null || Array.isArray(value.noteBodies)) {
+        return false;
+    }
+    return Object.values(value.noteBodies).every((body) => typeof body === "string");
 }
 export function createSyncHttpHandlers(service) {
     return {
@@ -168,6 +193,8 @@ export function createSyncHttpHandlers(service) {
                     return methodNotAllowed();
                 if (!isPushRequest(request.body))
                     return badRequest("Invalid push request.");
+                if (!hasValidNoteBodies(request.body))
+                    return badRequest("Invalid push note bodies.");
                 return jsonResponse(await service.acceptPush(request.body));
             }
             if (path === "/sync/v1/bodies/upload") {
@@ -179,16 +206,22 @@ export function createSyncHttpHandlers(service) {
                     return badRequest("Invalid body upload request.");
                 return jsonResponse(await service.uploadNoteBody(request.body));
             }
-            const noteId = noteIdFromBodyPath(path);
+            let noteId;
+            try {
+                noteId = noteIdFromBodyPath(path);
+            }
+            catch {
+                return badRequest("Invalid body download path.");
+            }
             if (noteId !== null) {
                 if (method !== "GET")
                     return methodNotAllowed();
-                return jsonResponse(await service.downloadNoteBody(noteId));
+                return jsonResponse(await service.downloadNoteBody(noteId, workspaceFromPath(request.path)));
             }
             if (path === "/sync/v1/status") {
                 if (method !== "GET")
                     return methodNotAllowed();
-                return jsonResponse(service.status ? await service.status() : { ok: true });
+                return jsonResponse(service.status ? await service.status(workspaceFromPath(request.path)) : { ok: true });
             }
             return jsonResponse({ error: "not-found" }, 404);
         },
