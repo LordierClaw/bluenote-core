@@ -2,7 +2,7 @@ import { test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
@@ -153,6 +153,22 @@ test("sync database lock does not evict an old metadata-less lock", async () => 
       () => repository.listDirtyRecords(),
       /busy/i,
     )
+  })
+})
+
+test("sync database lock is released if database open fails", async () => {
+  await withRoot("bluenote-sync-db-open-failure-", async (rootPath) => {
+    const repository = createDirtyRecordRepository(rootPath, dbIdentity)
+    const databasePath = path.join(rootPath, ".data", "sync", "sync.sqlite")
+    const lockPath = `${databasePath}.lock`
+    await rm(databasePath, { force: true })
+    await mkdir(databasePath)
+
+    assert.throws(
+      () => repository.listDirtyRecords(),
+      /EISDIR|directory/i,
+    )
+    assert.equal(existsSync(lockPath), false)
   })
 })
 

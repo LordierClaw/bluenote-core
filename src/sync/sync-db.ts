@@ -353,9 +353,10 @@ export function withSyncDatabase<Result>(
   ensureManagedRoot(rootPath)
   const syncDatabasePath = getSyncDatabasePath(rootPath)
   const releaseLock = acquireSyncDatabaseLock(syncDatabasePath)
-  const handle = openSyncDatabase(rootPath)
+  let handle: SyncDatabaseHandle | null = null
 
   try {
+    handle = openSyncDatabase(rootPath)
     bootstrapSyncSchema(handle, identity)
     const result = operation(handle)
     if (options.save === true) {
@@ -363,7 +364,9 @@ export function withSyncDatabase<Result>(
     }
     return result
   } finally {
-    handle.db.close()
+    if (handle) {
+      handle.db.close()
+    }
     releaseLock()
   }
 }
