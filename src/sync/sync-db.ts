@@ -127,20 +127,6 @@ function getSyncDatabaseLockMetadataPath(lockPath: string): string {
   return path.join(lockPath, "lock.json")
 }
 
-function isProcessAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false
-  }
-
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    const code = error instanceof Error && "code" in error ? (error as NodeJS.ErrnoException).code : undefined
-    return code === "EPERM"
-  }
-}
-
 function readSyncDatabaseLockMetadata(lockPath: string): SyncDatabaseLockMetadata | null {
   try {
     const parsed = JSON.parse(readFileSync(getSyncDatabaseLockMetadataPath(lockPath), "utf8")) as Partial<SyncDatabaseLockMetadata>
@@ -157,8 +143,7 @@ function readSyncDatabaseLockMetadata(lockPath: string): SyncDatabaseLockMetadat
 function isStaleSyncDatabaseLock(lockPath: string, now = Date.now()): boolean {
   const metadata = readSyncDatabaseLockMetadata(lockPath)
   if (metadata) {
-    const acquiredAt = Date.parse(metadata.acquiredAt)
-    return !isProcessAlive(metadata.pid) || (!Number.isNaN(acquiredAt) && now - acquiredAt > SYNC_DB_LOCK_STALE_AFTER_MS)
+    return false
   }
 
   try {

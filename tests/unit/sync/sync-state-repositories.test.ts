@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
 import { readFileSync, writeFileSync } from "node:fs"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
 import initSqlJs from "sql.js"
@@ -122,6 +122,23 @@ test("package root does not expose low-level sync database handles", async () =>
 
   assert.equal("openSyncDatabase" in core, false)
   assert.equal("saveSyncDatabase" in core, false)
+})
+
+test("sync database lock does not evict an old lock owned by a live process", async () => {
+  await withRoot("bluenote-sync-db-live-lock-", async (rootPath) => {
+    const repository = createDirtyRecordRepository(rootPath, dbIdentity)
+    const lockPath = path.join(rootPath, ".data", "sync", "sync.sqlite.lock")
+    await mkdir(lockPath, { recursive: true })
+    await writeFile(path.join(lockPath, "lock.json"), JSON.stringify({
+      pid: process.pid,
+      acquiredAt: "2000-01-01T00:00:00.000Z",
+    }, null, 2) + "\n", "utf8")
+
+    assert.throws(
+      () => repository.listDirtyRecords(),
+      /busy/i,
+    )
+  })
 })
 
 test("tombstone repository records deleted notes and folders", async () => {
