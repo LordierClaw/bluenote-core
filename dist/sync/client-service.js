@@ -1,9 +1,11 @@
 import path from "node:path";
 import fs from "node:fs";
 import { createNoteDescription } from "../domain/note-description.js";
+import { UsageError } from "../core/errors.js";
 import { assertPathInsideRoot, toRootRelativePath } from "../platform/path-safety.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { serializePlainNote } from "../storage/plain-note.js";
+import { getStateNotesPath } from "../storage/root-layout.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
 import { withSyncDatabase } from "./sync-db.js";
@@ -13,6 +15,13 @@ function metadataString(metadata, key) {
 }
 function basenameKey(relativePath) {
     return path.posix.basename(relativePath, ".md");
+}
+function assertMetadataKeyMatchesRelativePath(key, relativePath) {
+    if (key !== basenameKey(relativePath)) {
+        throw new UsageError("Pulled note metadata key must match the relativePath basename.", {
+            hint: "Rejecting inconsistent server note metadata to avoid writing a note to the wrong local path.",
+        });
+    }
 }
 function normalizeNoteRelativePath(rootPath, relativePath) {
     const portableRelativePath = relativePath.replace(/\\/g, "/").replace(/^\.\//, "");
@@ -49,17 +58,52 @@ function readSidecarIfExists(rootPath, noteId) {
     }
     return sidecars.readByNoteId(noteId);
 }
+function findSidecarOwnerForRelativePath(rootPath, relativePath) {
+    const stateNotesPath = getStateNotesPath(rootPath);
+    const sidecars = createSidecarRepository(rootPath);
+    if (!fs.existsSync(stateNotesPath)) {
+        return null;
+    }
+    for (const entry of fs.readdirSync(stateNotesPath, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".json")) {
+            continue;
+        }
+        const noteId = path.basename(entry.name, ".json");
+        const sidecar = sidecars.readByNoteId(noteId);
+        if (sidecar.relativePath === relativePath) {
+            return sidecar.noteId ?? noteId;
+        }
+    }
+    return null;
+}
+function assertPulledNotePathAvailable(rootPath, relativePath, noteId) {
+    const owner = findSidecarOwnerForRelativePath(rootPath, relativePath);
+    if (owner !== null && owner !== noteId) {
+        throw new UsageError(`Pulled note path '${relativePath}' is already owned by another note.`, {
+            hint: "Rejecting pulled note relocation to avoid overwriting local note content.",
+        });
+    }
+    const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
+    if (fs.existsSync(notePath) && owner !== noteId) {
+        throw new UsageError(`Pulled note path '${relativePath}' already exists.`, {
+            hint: "Rejecting pulled note to avoid overwriting an existing local Markdown file.",
+        });
+    }
+}
 function applyPulledNoteUpsert(rootPath, change, body) {
     const notes = createNoteRepository(rootPath);
     const sidecars = createSidecarRepository(rootPath);
     const existingSidecar = readSidecarIfExists(rootPath, change.entityId);
     const relativePath = normalizeNoteRelativePath(rootPath, metadataString(change.metadata, "relativePath") ?? change.relativePath ?? `note/${change.entityId}.md`);
     const key = metadataString(change.metadata, "key") ?? basenameKey(relativePath);
+    assertMetadataKeyMatchesRelativePath(key, relativePath);
+    assertPulledNotePathAvailable(rootPath, relativePath, change.entityId);
     const title = metadataString(change.metadata, "title") ?? change.title ?? key;
     const updatedAt = metadataString(change.metadata, "updatedAt") ?? change.changedAt;
     const createdAt = metadataString(change.metadata, "createdAt") ?? updatedAt;
     const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
     if (existingSidecar === null) {
+        fs.mkdirSync(path.dirname(notePath), { recursive: true });
         notes.create({
             noteId: change.entityId,
             body,
@@ -110,17 +154,23 @@ function applyPulledNoteDelete(rootPath, change) {
 }
 function applyPulledChange(rootPath, change, transport) {
     if (change.entityType !== "note") {
-        return;
+        return false;
     }
     if (change.changeType === "delete") {
         applyPulledNoteDelete(rootPath, change);
-        return;
+        return true;
     }
     if (change.changeType !== "upsert") {
-        return;
+        return false;
     }
-    const body = change.bodyAvailable === false ? "" : transport.downloadNoteBody(change.entityId).body;
+    if (change.bodyAvailable === false) {
+        throw new UsageError("Pulled note upsert is missing an available body.", {
+            hint: "Note upsert changes must provide a downloadable body before local content can be replaced.",
+        });
+    }
+    const body = transport.downloadNoteBody(change.entityId).body;
     applyPulledNoteUpsert(rootPath, change, body);
+    return true;
 }
 function toProtocolDirtyType(record) {
     if (record.entityType === "folder") {
@@ -178,8 +228,9 @@ export function createSyncClientService(options) {
             for (;;) {
                 const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit });
                 for (const change of response.changes) {
-                    applyPulledChange(rootPath, change, options.transport);
-                    dirty.clearDirtyRecord(change.entityType, change.entityId);
+                    if (applyPulledChange(rootPath, change, options.transport)) {
+                        dirty.clearDirtyRecord(change.entityType, change.entityId);
+                    }
                 }
                 pulled += response.changes.length;
                 sinceSequence = response.toSequence;

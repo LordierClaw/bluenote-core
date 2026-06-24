@@ -2,9 +2,11 @@ import path from "node:path"
 import fs from "node:fs"
 
 import { createNoteDescription } from "../domain/note-description"
+import { UsageError } from "../core/errors"
 import { assertPathInsideRoot, toRootRelativePath } from "../platform/path-safety"
 import { createNoteRepository } from "../storage/note-repository"
 import { serializePlainNote } from "../storage/plain-note"
+import { getStateNotesPath } from "../storage/root-layout"
 import { createSidecarRepository } from "../storage/sidecar-repository"
 import type { NoteSidecar } from "../storage/sidecar-schema"
 import { createDirtyRecordRepository } from "./dirty-repository"
@@ -35,6 +37,14 @@ function metadataString(metadata: Record<string, unknown> | null, key: string): 
 
 function basenameKey(relativePath: string): string {
   return path.posix.basename(relativePath, ".md")
+}
+
+function assertMetadataKeyMatchesRelativePath(key: string, relativePath: string): void {
+  if (key !== basenameKey(relativePath)) {
+    throw new UsageError("Pulled note metadata key must match the relativePath basename.", {
+      hint: "Rejecting inconsistent server note metadata to avoid writing a note to the wrong local path.",
+    })
+  }
 }
 
 function normalizeNoteRelativePath(rootPath: string, relativePath: string): string {
@@ -79,18 +89,58 @@ function readSidecarIfExists(rootPath: string, noteId: string): NoteSidecar | nu
   return sidecars.readByNoteId(noteId)
 }
 
+function findSidecarOwnerForRelativePath(rootPath: string, relativePath: string): string | null {
+  const stateNotesPath = getStateNotesPath(rootPath)
+  const sidecars = createSidecarRepository(rootPath)
+  if (!fs.existsSync(stateNotesPath)) {
+    return null
+  }
+
+  for (const entry of fs.readdirSync(stateNotesPath, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      continue
+    }
+    const noteId = path.basename(entry.name, ".json")
+    const sidecar = sidecars.readByNoteId(noteId)
+    if (sidecar.relativePath === relativePath) {
+      return sidecar.noteId ?? noteId
+    }
+  }
+
+  return null
+}
+
+function assertPulledNotePathAvailable(rootPath: string, relativePath: string, noteId: string): void {
+  const owner = findSidecarOwnerForRelativePath(rootPath, relativePath)
+  if (owner !== null && owner !== noteId) {
+    throw new UsageError(`Pulled note path '${relativePath}' is already owned by another note.`, {
+      hint: "Rejecting pulled note relocation to avoid overwriting local note content.",
+    })
+  }
+
+  const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath))
+  if (fs.existsSync(notePath) && owner !== noteId) {
+    throw new UsageError(`Pulled note path '${relativePath}' already exists.`, {
+      hint: "Rejecting pulled note to avoid overwriting an existing local Markdown file.",
+    })
+  }
+}
+
 function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: string): void {
   const notes = createNoteRepository(rootPath)
   const sidecars = createSidecarRepository(rootPath)
   const existingSidecar = readSidecarIfExists(rootPath, change.entityId)
   const relativePath = normalizeNoteRelativePath(rootPath, metadataString(change.metadata, "relativePath") ?? change.relativePath ?? `note/${change.entityId}.md`)
   const key = metadataString(change.metadata, "key") ?? basenameKey(relativePath)
+  assertMetadataKeyMatchesRelativePath(key, relativePath)
+  assertPulledNotePathAvailable(rootPath, relativePath, change.entityId)
   const title = metadataString(change.metadata, "title") ?? change.title ?? key
   const updatedAt = metadataString(change.metadata, "updatedAt") ?? change.changedAt
   const createdAt = metadataString(change.metadata, "createdAt") ?? updatedAt
   const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath))
 
   if (existingSidecar === null) {
+    fs.mkdirSync(path.dirname(notePath), { recursive: true })
     notes.create({
       noteId: change.entityId,
       body,
@@ -142,19 +192,25 @@ function applyPulledNoteDelete(rootPath: string, change: SyncChangeView): void {
   }
 }
 
-function applyPulledChange(rootPath: string, change: SyncChangeView, transport: SyncTransport): void {
+function applyPulledChange(rootPath: string, change: SyncChangeView, transport: SyncTransport): boolean {
   if (change.entityType !== "note") {
-    return
+    return false
   }
   if (change.changeType === "delete") {
     applyPulledNoteDelete(rootPath, change)
-    return
+    return true
   }
   if (change.changeType !== "upsert") {
-    return
+    return false
   }
-  const body = change.bodyAvailable === false ? "" : transport.downloadNoteBody(change.entityId).body
+  if (change.bodyAvailable === false) {
+    throw new UsageError("Pulled note upsert is missing an available body.", {
+      hint: "Note upsert changes must provide a downloadable body before local content can be replaced.",
+    })
+  }
+  const body = transport.downloadNoteBody(change.entityId).body
   applyPulledNoteUpsert(rootPath, change, body)
+  return true
 }
 
 function toProtocolDirtyType(record: DirtyRecord): SyncPushRecord["dirtyType"] {
@@ -220,8 +276,9 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
       for (;;) {
         const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit })
         for (const change of response.changes) {
-          applyPulledChange(rootPath, change, options.transport)
-          dirty.clearDirtyRecord(change.entityType, change.entityId)
+          if (applyPulledChange(rootPath, change, options.transport)) {
+            dirty.clearDirtyRecord(change.entityType, change.entityId)
+          }
         }
         pulled += response.changes.length
         sinceSequence = response.toSequence

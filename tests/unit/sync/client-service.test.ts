@@ -202,6 +202,189 @@ describe("sync client service", () => {
     })
   })
 
+  test("pulled note upsert without an available body does not wipe local content", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Keep Body",
+        body: "Do not erase this.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-keep-body",
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      dirty.markDirty({
+        entityType: "note",
+        entityId: note.noteId,
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { key: note.key, relativePath: note.relativePath, title: note.title },
+      })
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 6,
+          hasMore: false,
+          changes: [{
+            sequence: 6,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: note.title,
+            relativePath: note.relativePath,
+            bodyAvailable: false,
+            metadata: { key: note.key, relativePath: note.relativePath, title: note.title, updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /body/i)
+      assert.equal(core.notes.get(note.key).body, "Do not erase this.\n")
+      assert.equal(dirty.listDirtyRecords().some((record) => record.entityId === note.noteId), true)
+      assert.deepEqual(transport.calls, ["pull"])
+    })
+  })
+
+  test("pulled new note creates missing destination folders", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const core = createBlueNoteCore({ rootPath })
+      const transport = makeTransport({
+        bodies: { "note-server-new": "Hydrated from server.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 7,
+          hasMore: false,
+          changes: [{
+            sequence: 7,
+            entityType: "note",
+            entityId: "note-server-new",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Server New",
+            relativePath: "note/projects/server-new.md",
+            bodyAvailable: true,
+            metadata: { key: "server-new", relativePath: "note/projects/server-new.md", title: "Server New", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.equal(core.notes.get("server-new").body, "Hydrated from server.\n")
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "server-new.md")), true)
+    })
+  })
+
+  test("pulled relocation rejects paths owned by another local note", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const first = core.notes.create({ type: "normal", title: "First", body: "First body.\n", destinationFolder: "note/projects", enqueueAi: false, noteIdGenerator: () => "note-first" })
+      const second = core.notes.create({ type: "normal", title: "Second", body: "Second body.\n", destinationFolder: "note/projects", enqueueAi: false, noteIdGenerator: () => "note-second" })
+      const transport = makeTransport({
+        bodies: { [first.noteId]: "Server relocated first.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 8,
+          hasMore: false,
+          changes: [{
+            sequence: 8,
+            entityType: "note",
+            entityId: first.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: second.title,
+            relativePath: second.relativePath,
+            bodyAvailable: true,
+            metadata: { key: second.key, relativePath: second.relativePath, title: second.title, updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /already exists|owned/i)
+      assert.equal(core.notes.get(first.key).body, "First body.\n")
+      assert.equal(core.notes.get(second.key).body, "Second body.\n")
+    })
+  })
+
+  test("ignored pulled non-note changes do not clear local dirty records", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      dirty.markDirty({
+        entityType: "folder",
+        entityId: "note/projects",
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/projects" },
+      })
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 9,
+          hasMore: false,
+          changes: [{
+            sequence: 9,
+            entityType: "folder",
+            entityId: "note/projects",
+            changeType: "folder-upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            metadata: { relativePath: "note/projects" },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 1, pulled: 1 })
+      assert.equal(dirty.listDirtyRecords().length, 0)
+      assert.equal(transport.pushes[0].records[0].dirtyType, "folder-upsert")
+    })
+  })
+
+  test("pulled note metadata key must match the relative path basename", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const transport = makeTransport({
+        bodies: { "note-key-mismatch": "Mismatch.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 10,
+          hasMore: false,
+          changes: [{
+            sequence: 10,
+            entityType: "note",
+            entityId: "note-key-mismatch",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Mismatch",
+            relativePath: "note/projects/server-key.md",
+            bodyAvailable: true,
+            metadata: { key: "different-key", relativePath: "note/projects/server-key.md", title: "Mismatch", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /key.*relativePath|relativePath.*key/i)
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "server-key.md")), false)
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "different-key.md")), false)
+    })
+  })
+
   test("createBlueNoteCore sync.now uses a configured abstract transport", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
