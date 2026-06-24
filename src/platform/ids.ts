@@ -13,3 +13,7 @@ export const uuidGenerator: IdGenerator = {
 export function createWorkspaceId(): string {
   return `workspace_${randomUUID()}`
 }
+
+export function createNoteId(): string {
+  return `note_${randomUUID()}`
+}

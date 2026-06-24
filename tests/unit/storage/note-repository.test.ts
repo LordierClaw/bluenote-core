@@ -60,6 +60,36 @@ test("repository writes a new note to note", async () => {
   }
 })
 
+test("repository writes schema 3 sidecars by noteId while preserving key and markdown path", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-note-id-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    const created = repository.create({
+      noteId: "note_repo_123",
+      frontmatter: FIXED_FRONTMATTER,
+      body: "Hello from BlueNote.\n",
+    })
+
+    assert.equal(created.relativePath, "note/note-123.md")
+    assert.equal(created.notePath, path.join(rootPath, "note", "note-123.md"))
+    assert.equal(await readFile(created.notePath, "utf8"), "Hello from BlueNote.\n")
+
+    const sidecarPath = path.join(getStateNotesPath(rootPath), "note_repo_123.json")
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"))
+    assert.equal(sidecar.noteId, "note_repo_123")
+    assert.equal(sidecar.key, "note-123")
+    assert.equal(sidecar.relativePath, "note/note-123.md")
+    await assert.rejects(access(path.join(getStateNotesPath(rootPath), "note-123.json")))
+
+    const loaded = repository.read(created.notePath)
+    assert.deepEqual(loaded.frontmatter, FIXED_FRONTMATTER)
+    assert.equal(loaded.body, "Hello from BlueNote.\n")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("repository list reads typed normal sidecars produced by create", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-list-sidecars-"))
 

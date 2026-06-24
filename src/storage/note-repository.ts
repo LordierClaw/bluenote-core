@@ -14,6 +14,7 @@ import { replaceNoteBodyAtomically } from "./atomic-note-writer"
 import { getArchiveNotePath, getArchiveNotesPath, getDraftNotesPath, getInboxNotePath, getNormalNotesPath, getStateNotesPath } from "./root-layout"
 
 export interface CreateStoredNoteInput {
+  noteId?: string
   frontmatter: NoteFrontmatter
   body: string
   destination?: CreateStoredNoteDestination
@@ -263,9 +264,10 @@ function inferNoteType(relativePath: string, archivedAt: string | null): NoteTyp
   return "normal"
 }
 
-function buildSidecar(frontmatter: NoteFrontmatter, relativePath: string, body: string, archivedAt: string | null): NoteSidecar {
+function buildSidecar(frontmatter: NoteFrontmatter, relativePath: string, body: string, archivedAt: string | null, noteId?: string): NoteSidecar {
   return {
     type: inferNoteType(relativePath, archivedAt),
+    ...(noteId === undefined ? {} : { noteId }),
     key: frontmatter.id,
     title: frontmatter.title,
     description: deriveDescription(body),
@@ -331,6 +333,23 @@ function listSidecarKeys(rootPath: string): string[] {
     .map((entry) => path.basename(entry, ".json"))
 }
 
+function findSidecarForNote(rootPath: string, sidecars: ReturnType<typeof createSidecarRepository>, key: string, relativePath: string): NoteSidecar | undefined {
+  const legacySidecarPath = sidecars.getSidecarPath(key)
+
+  if (fs.existsSync(legacySidecarPath)) {
+    return sidecars.read(key)
+  }
+
+  for (const sidecarKey of listSidecarKeys(rootPath)) {
+    const sidecar = sidecars.read(sidecarKey)
+    if (sidecar.key === key && path.normalize(sidecar.relativePath) === path.normalize(relativePath)) {
+      return sidecar
+    }
+  }
+
+  return undefined
+}
+
 function assertCustomNormalFolderRename(rootPath: string, folderRelativePath: string, nextName: string): { previousRelativePath: string; nextRelativePath: string; previousPath: string; nextPath: string } {
   const previousRelativePath = normalizeFolderRelativePath(folderRelativePath)
   const nextSegment = folderNameFromInput(nextName)
@@ -374,9 +393,15 @@ export function createNoteRepository(rootPath: string): NoteRepository {
         canonicalFrontmatter,
         input.destination,
       )
-      const sidecarPath = sidecars.getSidecarPath(canonicalFrontmatter.id)
+      const legacySidecarPath = sidecars.getSidecarPath(canonicalFrontmatter.id)
+      const noteIdSidecarPath = input.noteId === undefined ? undefined : sidecars.getSidecarPathByNoteId(input.noteId)
 
-      if (fs.existsSync(notePath) || fs.existsSync(sidecarPath) || noteKeyExists(normalizedRootPath, canonicalFrontmatter.id)) {
+      if (
+        fs.existsSync(notePath)
+        || fs.existsSync(legacySidecarPath)
+        || (noteIdSidecarPath !== undefined && fs.existsSync(noteIdSidecarPath))
+        || noteKeyExists(normalizedRootPath, canonicalFrontmatter.id)
+      ) {
         throw new UsageError(`Could not create note '${relativePath}'.`, {
           hint: "A note with the same basename/key already exists somewhere under note/, draft/, or in sidecar metadata. Use a different id or remove/archive the existing note first.",
         })
@@ -386,7 +411,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
         body: input.body,
         sourcePath: relativePath,
       })
-      const sidecar = buildSidecar(canonicalFrontmatter, relativePath, input.body, canonicalFrontmatter.archivedAt ?? null)
+      const sidecar = buildSidecar(canonicalFrontmatter, relativePath, input.body, canonicalFrontmatter.archivedAt ?? null, input.noteId)
       let wroteNoteFile = false
 
       try {
@@ -434,16 +459,13 @@ export function createNoteRepository(rootPath: string): NoteRepository {
         wrapRepositoryError("read", relativePath, error)
       }
 
-      const sidecarPath = sidecars.getSidecarPath(key)
-
       try {
         const plainNote = parsePlainNote(markdown, relativePath)
+        const sidecar = findSidecarForNote(normalizedRootPath, sidecars, key, relativePath)
 
-        if (!fs.existsSync(sidecarPath)) {
+        if (sidecar === undefined) {
           return parseNoteFile(markdown, relativePath)
         }
-
-        const sidecar = sidecars.read(key)
 
         if (path.normalize(sidecar.relativePath) !== path.normalize(relativePath)) {
           throw new NoteMetadataPathMismatchError(

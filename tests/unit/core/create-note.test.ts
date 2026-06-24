@@ -1,6 +1,6 @@
 import { test } from "vitest"
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
+import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -34,10 +34,41 @@ test("createNote creates an untitled draft with generated draft key and title", 
     assert.equal(created.description, "Draft body.")
     assert.equal(await readFile(created.notePath, "utf8"), "Draft body.\n")
 
-    const sidecar = JSON.parse(await readFile(path.join(getStateNotesPath(rootPath), "draft-000zzz.json"), "utf8"))
+    const sidecar = JSON.parse(await readFile(path.join(getStateNotesPath(rootPath), `${created.noteId}.json`), "utf8"))
     assert.equal(sidecar.type, "draft")
     assert.equal(sidecar.key, "draft-000zzz")
     assert.equal(sidecar.title, "draft-000zzz")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("createNote assigns a noteId while preserving the human-readable key and markdown path", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-create-note-note-id-"))
+
+  try {
+    const created = createNote({
+      override: rootPath,
+      type: "draft",
+      title: "Readable Idea",
+      body: "Draft body.\n",
+      randomSource: () => 46655,
+      noteIdGenerator: () => "note_test_123",
+      clock: fixedClock("2026-06-06T12:00:00.000Z"),
+    })
+
+    assert.equal(created.noteId, "note_test_123")
+    assert.equal(created.key, "readable-idea-000zzz")
+    assert.equal(created.relativePath, "draft/readable-idea-000zzz.md")
+    assert.equal(created.notePath, path.join(rootPath, "draft", "readable-idea-000zzz.md"))
+    assert.equal(await readFile(created.notePath, "utf8"), "Draft body.\n")
+
+    const sidecarPath = path.join(getStateNotesPath(rootPath), "note_test_123.json")
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"))
+    assert.equal(sidecar.noteId, "note_test_123")
+    assert.equal(sidecar.key, "readable-idea-000zzz")
+    assert.equal(sidecar.relativePath, "draft/readable-idea-000zzz.md")
+    await assert.rejects(access(path.join(getStateNotesPath(rootPath), "readable-idea-000zzz.json")))
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }
@@ -60,7 +91,7 @@ test("createNote creates a titled draft under draft", async () => {
     assert.equal(created.title, "Idea")
     assert.equal(created.relativePath, "draft/idea-000zzz.md")
 
-    const sidecar = JSON.parse(await readFile(path.join(getStateNotesPath(rootPath), "idea-000zzz.json"), "utf8"))
+    const sidecar = JSON.parse(await readFile(path.join(getStateNotesPath(rootPath), `${created.noteId}.json`), "utf8"))
     assert.equal(sidecar.type, "draft")
     assert.equal(sidecar.relativePath, "draft/idea-000zzz.md")
   } finally {
@@ -89,7 +120,7 @@ test("createNote creates a normal note in an existing note destination folder", 
     assert.equal(created.relativePath, "note/work/meeting-000zzz.md")
     assert.equal(await readFile(created.notePath, "utf8"), "Meeting body.\n")
 
-    const sidecar = JSON.parse(await readFile(path.join(getStateNotesPath(rootPath), "meeting-000zzz.json"), "utf8"))
+    const sidecar = JSON.parse(await readFile(path.join(getStateNotesPath(rootPath), `${created.noteId}.json`), "utf8"))
     assert.equal(sidecar.type, "normal")
     assert.equal(sidecar.relativePath, "note/work/meeting-000zzz.md")
   } finally {
@@ -114,7 +145,7 @@ test("createNote defaults titled notes to drafts unless normal creation is expli
     assert.equal(created.relativePath, "draft/default-destination-000zzz.md")
     assert.equal(await readFile(created.notePath, "utf8"), "Default note body.")
 
-    const sidecar = JSON.parse(await readFile(path.join(getStateNotesPath(rootPath), "default-destination-000zzz.json"), "utf8"))
+    const sidecar = JSON.parse(await readFile(path.join(getStateNotesPath(rootPath), `${created.noteId}.json`), "utf8"))
     assert.equal(sidecar.type, "draft")
     assert.equal(sidecar.relativePath, "draft/default-destination-000zzz.md")
   } finally {

@@ -8,6 +8,7 @@ import { createNoteDescription } from "../domain/note-description"
 import { createDraftNoteKey, createNoteKey } from "../domain/note-key"
 import { rebuildIndexes } from "./rebuild-indexes"
 import { systemClock, type Clock } from "../platform/clock"
+import { createNoteId } from "../platform/ids"
 import { createNoteRepository } from "../storage/note-repository"
 import { ensureManagedRoot, getStateNotesPath } from "../storage/root-layout"
 
@@ -18,10 +19,12 @@ export interface CreateNoteOptions extends ResolveBlueNoteRootOptions {
   destinationFolder?: string
   clock?: Clock
   randomSource?: () => number
+  noteIdGenerator?: () => string
   enqueueAi?: boolean
 }
 
 export interface CreateNoteSummary {
+  noteId: string
   key: string
   title: string
   description: string
@@ -68,6 +71,7 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
   const timestamp = clock.now().toISOString()
   const repository = createNoteRepository(rootPath)
   const existingKeys = listExistingCreateKeys(rootPath, repository)
+  const noteId = (options.noteIdGenerator ?? createNoteId)()
   const type = options.type ?? "draft"
   let title: string
   let key: string
@@ -112,6 +116,7 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
 
   const description = createNoteDescription(options.body ?? "")
   const created = repository.create({
+    noteId,
     frontmatter: {
       id: key,
       schemaVersion: 1,
@@ -148,6 +153,7 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
   }
 
   return {
+    noteId,
     key,
     title,
     description,
