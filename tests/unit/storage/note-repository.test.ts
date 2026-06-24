@@ -470,6 +470,89 @@ test("repository archive rolls back the destination file when removing the sourc
   }
 })
 
+test("repository mutations preserve noteId-keyed sidecars without creating legacy sidecars", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-note-id-mutations-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    await mkdir(path.join(rootPath, "note", "work", "projects"), { recursive: true })
+    const created = repository.create({
+      noteId: "note_mutation_123",
+      frontmatter: { ...FIXED_FRONTMATTER, id: "mutation-note", title: "Mutation Note" },
+      body: "Original body.\n",
+      destination: { type: "normal", folderRelativePath: "note/work" },
+    })
+    const sidecarPath = path.join(getStateNotesPath(rootPath), "note_mutation_123.json")
+    const legacySidecarPath = path.join(getStateNotesPath(rootPath), "mutation-note.json")
+
+    repository.syncEditedNote(created.notePath, {
+      title: "Mutation Note Edited",
+      body: "Edited body.\n",
+      updatedAt: "2026-06-07T10:00:00.000Z",
+    })
+
+    let sidecar = JSON.parse(await readFile(sidecarPath, "utf8"))
+    assert.equal(sidecar.noteId, "note_mutation_123")
+    assert.equal(sidecar.key, "mutation-note")
+    assert.equal(sidecar.description, "Edited body.")
+    await assert.rejects(access(legacySidecarPath))
+
+    const moved = repository.moveNote(created.notePath, "note/work/projects", "2026-06-07T11:00:00.000Z")
+    sidecar = JSON.parse(await readFile(sidecarPath, "utf8"))
+    assert.equal(sidecar.noteId, "note_mutation_123")
+    assert.equal(sidecar.relativePath, "note/work/projects/mutation-note.md")
+    assert.equal(sidecar.updatedAt, "2026-06-07T11:00:00.000Z")
+    await assert.rejects(access(legacySidecarPath))
+
+    const archived = repository.archive(moved.notePath, "2026-06-07T12:00:00.000Z")
+    sidecar = JSON.parse(await readFile(sidecarPath, "utf8"))
+    assert.equal(sidecar.noteId, "note_mutation_123")
+    assert.equal(sidecar.type, "archived")
+    assert.equal(sidecar.relativePath, ".data/archive/mutation-note.md")
+    assert.equal(sidecar.archivedAt, "2026-06-07T12:00:00.000Z")
+    await assert.rejects(access(legacySidecarPath))
+
+    repository.delete(archived.notePath)
+    await assert.rejects(access(sidecarPath))
+    await assert.rejects(access(legacySidecarPath))
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("repository rename preserves noteId-keyed sidecar path", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-note-id-rename-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
+    const created = repository.create({
+      noteId: "note_rename_123",
+      frontmatter: { ...FIXED_FRONTMATTER, id: "old-title", title: "Old Title" },
+      body: "Original body.\n",
+      destination: { type: "normal", folderRelativePath: "note/work" },
+    })
+    const sidecarPath = path.join(getStateNotesPath(rootPath), "note_rename_123.json")
+
+    const renamed = repository.rename(created.notePath, {
+      nextKey: "new-title",
+      title: "New Title",
+      body: "Renamed body.\n",
+      updatedAt: "2026-06-07T10:00:00.000Z",
+    })
+
+    assert.equal(renamed.relativePath, "note/work/new-title.md")
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"))
+    assert.equal(sidecar.noteId, "note_rename_123")
+    assert.equal(sidecar.key, "new-title")
+    assert.equal(sidecar.relativePath, "note/work/new-title.md")
+    await assert.rejects(access(path.join(getStateNotesPath(rootPath), "old-title.json")))
+    await assert.rejects(access(path.join(getStateNotesPath(rootPath), "new-title.json")))
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("syncEditedNote preserves the previous note body when the atomic body write fails", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-sync-atomic-failure-"))
 
