@@ -150,13 +150,24 @@ function redactString(value: string): string {
     }
   }
 
+  if (/^[^\s"'<>?#=&]+=[^\s"'<>?#&]+(?:&[^\s"'<>?#=&]+=[^\s"'<>?#&]+)*$/u.test(value)) {
+    const bareParams = redactParams(value)
+    if (bareParams.changed) {
+      return bareParams.value
+    }
+  }
+
   const withEmbeddedUrls = value.replace(/https?:\/\/[^\s"'<>]+/giu, (match) => redactUrl(match) ?? match)
   const withEmbeddedParams = withEmbeddedUrls.replace(/([?#])([^\s"'<>]+)/gu, (match, prefix: string, rawParams: string) => {
     const params = redactParams(rawParams)
     return params.changed ? `${prefix}${params.value}` : match
   })
+  const withEmbeddedBareParams = withEmbeddedParams.replace(/(^|\s)([^\s"'<>?#=&]+=[^\s"'<>?#&]+(?:&[^\s"'<>?#=&]+=[^\s"'<>?#&]+)+)/gu, (match, prefix: string, rawParams: string) => {
+    const params = redactParams(rawParams)
+    return params.changed ? `${prefix}${params.value}` : match
+  })
 
-  return withEmbeddedParams
+  return withEmbeddedBareParams
     .replace(/\/\/[^/@\s]+@/gu, `//${redacted}@`)
     .replace(/([?&](?:access_token|api_key|apikey|auth|authorization|client_secret|code|id_token|key|password|refresh_token|secret|token)=)[^&#\s]+/giu, `$1${redacted}`)
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/giu, `Bearer ${redacted}`)

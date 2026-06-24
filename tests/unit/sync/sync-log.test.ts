@@ -147,6 +147,21 @@ describe("sync log", () => {
     )
 
     assert.equal(
+      redactSyncLogValue("accessToken=TOKEN-LEAK&safe=1"),
+      "accessToken=%5Bredacted%5D&safe=1",
+    )
+
+    assert.equal(
+      redactSyncLogValue("refreshToken=REFRESH&safe=1"),
+      "refreshToken=%5Bredacted%5D&safe=1",
+    )
+
+    assert.equal(
+      redactSyncLogValue("foo accessToken=TOKEN-LEAK&safe=1"),
+      "foo accessToken=%5Bredacted%5D&safe=1",
+    )
+
+    assert.equal(
       redactSyncLogValue("failed ?accessToken=TOKEN-LEAK&safe=1"),
       "failed ?accessToken=%5Bredacted%5D&safe=1",
     )
