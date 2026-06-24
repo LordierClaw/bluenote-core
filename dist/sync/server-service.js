@@ -155,6 +155,9 @@ function createDestinationForRelativePath(relativePath) {
         ? { type: "draft" }
         : { type: "normal", folderRelativePath: path.posix.dirname(relativePath) };
 }
+function noteTypeForRelativePath(relativePath) {
+    return relativePath.startsWith("draft/") ? "draft" : "normal";
+}
 function readSidecarIfExists(rootPath, noteId) {
     const sidecars = createSidecarRepository(rootPath);
     if (!fs.existsSync(sidecars.getSidecarPathByNoteId(noteId))) {
@@ -270,6 +273,7 @@ function upsertNote(rootPath, record, body) {
                 }
                 sidecars.write({
                     ...sidecar,
+                    type: noteTypeForRelativePath(metadata.relativePath),
                     key: metadata.key,
                     title: metadata.title,
                     description: createNoteDescription(body),
@@ -339,6 +343,7 @@ function applyFolderPush(rootPath, handle, record) {
     const deletedAt = record.dirtyType === "folder-delete" ? record.clientUpdatedAt : null;
     const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
     const existed = fs.existsSync(folderPath);
+    assertPathAndParentsAreNotSymlinks(rootPath, folderPath);
     if (record.dirtyType === "folder-upsert") {
         fs.mkdirSync(folderPath, { recursive: true });
     }

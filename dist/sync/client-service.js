@@ -47,6 +47,9 @@ function destinationForPulledNote(relativePath) {
         ? { type: "draft" }
         : { type: "normal", folderRelativePath: path.posix.dirname(relativePath) };
 }
+function noteTypeForRelativePath(relativePath) {
+    return relativePath.startsWith("draft/") ? "draft" : "normal";
+}
 function assertExistingPathIsNotSymlink(filePath, relativeLabel) {
     try {
         if (fs.lstatSync(filePath).isSymbolicLink()) {
@@ -223,6 +226,7 @@ function applyPulledNoteUpsert(rootPath, change, body) {
         }
         sidecars.write({
             ...existingSidecar,
+            type: noteTypeForRelativePath(relativePath),
             key,
             title,
             description: createNoteDescription(body),
@@ -260,13 +264,21 @@ function normalizeFolderRelativePath(rootPath, change) {
             hint: "Pulled folder sync changes must target folders under note/.",
         });
     }
-    return toRootRelativePath(rootPath, assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath)));
+    const normalizedRelativePath = toRootRelativePath(rootPath, assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath)));
+    if (normalizedRelativePath !== "note" && !normalizedRelativePath.startsWith("note/")) {
+        throw new UsageError(`Invalid pulled folder relativePath '${rawRelativePath}'.`, {
+            hint: "Pulled folder sync changes must target folders under note/.",
+        });
+    }
+    return normalizedRelativePath;
 }
 function applyPulledFolderChange(rootPath, identity, change) {
     const relativePath = normalizeFolderRelativePath(rootPath, change);
     const deletedAt = change.changeType === "folder-delete" ? metadataString(change.metadata, "deletedAt") ?? change.changedAt : null;
     if (deletedAt === null) {
-        fs.mkdirSync(assertPathInsideRoot(rootPath, path.join(rootPath, relativePath)), { recursive: true });
+        const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
+        assertPathAndParentsAreNotSymlinks(rootPath, folderPath);
+        fs.mkdirSync(folderPath, { recursive: true });
     }
     createFolderRepository(rootPath, identity).upsertFolder({
         relativePath,

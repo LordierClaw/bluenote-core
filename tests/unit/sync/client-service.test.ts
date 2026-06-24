@@ -355,6 +355,55 @@ describe("sync client service", () => {
     })
   })
 
+  test("pulled promoted drafts update local sidecar type", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const core = createBlueNoteCore({ rootPath })
+      core.notes.create({
+        type: "draft",
+        title: "Promoted Draft",
+        body: "Local draft body.\n",
+        noteIdGenerator: () => "note-promoted-client",
+        randomSource: () => 46655,
+        enqueueAi: false,
+      })
+      const transport = makeTransport({
+        bodies: { "note-promoted-client": "Promoted server body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 8,
+          hasMore: false,
+          changes: [{
+            sequence: 8,
+            entityType: "note",
+            entityId: "note-promoted-client",
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T02:00:00.000Z",
+            title: "Promoted Draft",
+            relativePath: "note/promoted-draft.md",
+            bodyAvailable: true,
+            metadata: {
+              key: "promoted-draft",
+              relativePath: "note/promoted-draft.md",
+              title: "Promoted Draft",
+              createdAt: "2026-06-24T01:00:00.000Z",
+              updatedAt: "2026-06-24T02:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      const sidecar = createSidecarRepository(rootPath).readByNoteId("note-promoted-client")
+      assert.equal(sidecar.type, "normal")
+      assert.equal(sidecar.relativePath, "note/promoted-draft.md")
+      assert.equal(existsSync(path.join(rootPath, "draft", "promoted-draft-000zzz.md")), false)
+      assert.equal(readFileSync(path.join(rootPath, "note", "promoted-draft.md"), "utf8"), "Promoted server body.\n")
+    })
+  })
+
   test("sync cycle normalizes dirty folder records to protocol folder dirty types", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
@@ -414,6 +463,37 @@ describe("sync client service", () => {
           deletedAt: null,
         },
       ])
+    })
+  })
+
+  test("pulled folder paths must remain under note after normalization", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 9,
+          hasMore: false,
+          changes: [{
+            sequence: 9,
+            entityType: "folder",
+            entityId: "note/../draft/escaped",
+            changeType: "folder-upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            relativePath: "note/../draft/escaped",
+            bodyAvailable: false,
+            metadata: { relativePath: "note/../draft/escaped" },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /folder relativePath/i,
+      )
+      assert.equal(existsSync(path.join(rootPath, "draft", "escaped")), false)
     })
   })
 

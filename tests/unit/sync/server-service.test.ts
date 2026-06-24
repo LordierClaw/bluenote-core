@@ -178,6 +178,57 @@ test("server accepts synced draft note upserts", async () => {
   })
 })
 
+test("server updates sidecar type when a pushed draft relocates to a normal note", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    const initial = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-promoted": "Draft body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-promoted",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "promoted-draft",
+          title: "Promoted Draft",
+          relativePath: "draft/promoted-draft.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }],
+    })
+    assert.equal(initial.rejected.length, 0)
+
+    const promoted = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: initial.serverSequence,
+      noteBodies: { "note-promoted": "Promoted body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-promoted",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+        metadata: {
+          key: "promoted-draft",
+          title: "Promoted Draft",
+          relativePath: "note/promoted-draft.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:01:00.000Z",
+        },
+      }],
+    })
+
+    assert.equal(promoted.rejected.length, 0)
+    assert.equal(createSidecarRepository(rootPath).readByNoteId("note-promoted").type, "normal")
+    assert.equal(existsSync(path.join(rootPath, "draft", "promoted-draft.md")), false)
+    assert.equal(readFileSync(path.join(rootPath, "note", "promoted-draft.md"), "utf8"), "Promoted body.\n")
+  })
+})
+
 test("server rejects pushed note relocations through symlinked destination parents", async () => {
   await withRoot(async (rootPath) => {
     const outsidePath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-server-outside-"))
@@ -229,6 +280,35 @@ test("server rejects pushed note relocations through symlinked destination paren
       assert.equal(response.rejected.length, 1)
       assert.equal(existsSync(path.join(outsidePath, "escaped.md")), false)
       assert.equal(readFileSync(path.join(rootPath, "note", "safe-note.md"), "utf8"), "Original body.\n")
+    } finally {
+      await rm(outsidePath, { recursive: true, force: true })
+    }
+  })
+})
+
+test("server rejects pushed folder upserts through symlinked parents", async () => {
+  await withRoot(async (rootPath) => {
+    const outsidePath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-server-folder-outside-"))
+    try {
+      const server = createSyncServerService({ rootPath, workspaceId })
+      symlinkSync(outsidePath, path.join(rootPath, "note", "link"), "dir")
+
+      const response = server.acceptPush({
+        workspaceId,
+        replicaId: "client-a",
+        baseSequence: 0,
+        records: [{
+          entityType: "folder",
+          entityId: "note/link/new",
+          dirtyType: "folder-upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: { relativePath: "note/link/new" },
+        }],
+      })
+
+      assert.equal(response.accepted.length, 0)
+      assert.equal(response.rejected.length, 1)
+      assert.equal(existsSync(path.join(outsidePath, "new")), false)
     } finally {
       await rm(outsidePath, { recursive: true, force: true })
     }
