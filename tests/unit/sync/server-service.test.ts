@@ -255,7 +255,7 @@ test("server allocates in-batch revisions transactionally for repeated entity ch
     ])
     assert.deepEqual(
       server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 }).changes.map((change) => change.serverRevision),
-      [1, 2],
+      [2],
     )
   })
 })
@@ -554,6 +554,9 @@ test("tombstone push deletes the note, records tombstone state, and appears in c
         serverRevision: 2,
       },
     ])
+
+    const fullHistory = server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 })
+    assert.deepEqual(fullHistory.changes.map((change) => change.changeType), ["delete"])
 
     const changes = server.getChanges({ workspaceId, sinceSequence: 1, limit: 10 })
     assert.deepEqual(changes.changes, [

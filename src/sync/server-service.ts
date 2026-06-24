@@ -706,8 +706,16 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
         const rows = handle.db.exec(
           `
             SELECT sequence, entityType, entityId, changeType, serverRevision, changedAt, title, relativePath, bodyAvailable, metadataJson
-            FROM server_changes
+            FROM server_changes AS changes
             WHERE workspaceId = ? AND sequence > ?
+              AND NOT EXISTS (
+                SELECT 1
+                FROM server_changes AS newer
+                WHERE newer.workspaceId = changes.workspaceId
+                  AND newer.entityType = changes.entityType
+                  AND newer.entityId = changes.entityId
+                  AND newer.sequence > changes.sequence
+              )
             ORDER BY sequence ASC
             LIMIT ?
           `,

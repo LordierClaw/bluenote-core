@@ -378,6 +378,7 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
     syncNow() {
       let pulled = 0
       let pushed = 0
+      let needsRebuild = false
       let sinceSequence = readLastPulledSequence(rootPath, identity, replicaId)
       const dirty = createDirtyRecordRepository(rootPath, identity)
 
@@ -386,6 +387,7 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
         for (const change of response.changes) {
           if (applyPulledChange(rootPath, change, options.transport)) {
             dirty.clearDirtyRecord(change.entityType, change.entityId)
+            needsRebuild = true
           }
         }
         pulled += response.changes.length
@@ -396,7 +398,7 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
         }
       }
 
-      if (pulled > 0) {
+      if (needsRebuild) {
         rebuildIndexes({ override: rootPath })
       }
 
@@ -405,7 +407,29 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
         const pushResponse = options.transport.push(buildPushRequest(rootPath, options.workspaceId, replicaId, sinceSequence, dirtyRecords))
         pushed = pushResponse.accepted.length
         clearAcceptedDirty(rootPath, identity, pushResponse)
-        writeReplicaProgress(rootPath, identity, replicaId, pushResponse.serverSequence, new Date().toISOString())
+        const pushedAt = new Date().toISOString()
+        while (pushResponse.serverSequence > sinceSequence) {
+          const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit })
+          for (const change of response.changes) {
+            if (applyPulledChange(rootPath, change, options.transport)) {
+              dirty.clearDirtyRecord(change.entityType, change.entityId)
+              needsRebuild = true
+            }
+          }
+          pulled += response.changes.length
+          if (response.toSequence <= sinceSequence) {
+            break
+          }
+          sinceSequence = response.toSequence
+          writeReplicaProgress(rootPath, identity, replicaId, sinceSequence, pushedAt)
+          if (!response.hasMore) {
+            break
+          }
+        }
+        writeReplicaProgress(rootPath, identity, replicaId, sinceSequence, pushedAt)
+        if (needsRebuild) {
+          rebuildIndexes({ override: rootPath })
+        }
       }
 
       return { status: "synced", pushed, pulled }

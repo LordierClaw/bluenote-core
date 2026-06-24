@@ -107,7 +107,7 @@ describe("sync client service", () => {
 
       const summary = createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
 
-      assert.deepEqual(transport.calls, ["pull", "push"])
+      assert.deepEqual(transport.calls, ["pull", "push", "pull"])
       assert.equal(transport.pushes.length, 1)
       assert.equal(transport.pushes[0].records.length, 1)
       assert.equal(transport.pushes[0].records[0].entityId, note.noteId)
@@ -262,6 +262,40 @@ describe("sync client service", () => {
     })
   })
 
+  test("push response does not mark unseen server changes as pulled", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      dirty.markDirty({
+        entityType: "folder",
+        entityId: "note/projects",
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/projects" },
+      })
+      const pullSinceSequences: number[] = []
+      const transport = makeTransport({
+        pull(request) {
+          pullSinceSequences.push(request.sinceSequence)
+          return { workspaceId: request.workspaceId, fromSequence: request.sinceSequence, toSequence: 5, hasMore: false, changes: [] }
+        },
+        push(request) {
+          return {
+            accepted: request.records.map((record) => ({ entityType: record.entityType, entityId: record.entityId, serverRevision: 1 })),
+            replacedByServer: [],
+            rejected: [],
+            serverSequence: 6,
+          }
+        },
+      })
+      const service = createSyncClientService({ rootPath, workspaceId, replicaId, transport })
+
+      assert.deepEqual(service.syncNow(), { status: "synced", pushed: 1, pulled: 0 })
+      assert.deepEqual(service.syncNow(), { status: "synced", pushed: 0, pulled: 0 })
+      assert.deepEqual(pullSinceSequences, [0, 5, 5])
+    })
+  })
+
   test("pulled note upsert without an available body does not wipe local content", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
@@ -407,7 +441,7 @@ describe("sync client service", () => {
         }),
       })
 
-      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 1, pulled: 1 })
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 1, pulled: 2 })
       assert.equal(dirty.listDirtyRecords().length, 0)
       assert.equal(transport.pushes[0].records[0].dirtyType, "folder-upsert")
     })

@@ -74,7 +74,7 @@ test("core sync moves a note from client A to server to client B and propagates 
       ai: { description: { lastProcessedAt: "2026-06-24T00:00:00.000Z" } },
     })
 
-    assert.deepEqual(clientA.sync.now({ transport, replicaId: "client-a" }), { status: "synced", pushed: 2, pulled: 0 })
+    assert.deepEqual(clientA.sync.now({ transport, replicaId: "client-a" }), { status: "synced", pushed: 2, pulled: 2 })
 
     clientB.sync.link({ mode: "seed-empty-server-from-local", serverUrl: "http://sync.local", workspaceId })
     assert.deepEqual(clientB.sync.now({ transport, replicaId: "client-b" }), { status: "synced", pushed: 0, pulled: 2 })
@@ -97,12 +97,12 @@ test("core sync moves a note from client A to server to client B and propagates 
       dirtyType: "upsert",
       markedAt: "2026-06-24T00:02:00.000Z",
     })
-    assert.deepEqual(clientA.sync.now({ transport, replicaId: "client-a" }), { status: "synced", pushed: 1, pulled: 0 })
+    assert.deepEqual(clientA.sync.now({ transport, replicaId: "client-a" }), { status: "synced", pushed: 1, pulled: 1 })
     assert.deepEqual(clientB.sync.now({ transport, replicaId: "client-b" }), { status: "synced", pushed: 0, pulled: 1 })
     assert.deepEqual(createSidecarRepository(clientBRoot).readByNoteId(created.noteId).ai, { description: { lastProcessedAt: "2026-06-24T00:02:00.000Z" } })
 
     clientA.notes.delete(created.key, { force: true, clock: { now: () => new Date("2026-06-24T00:01:00.000Z") } })
-    assert.deepEqual(clientA.sync.now({ transport, replicaId: "client-a" }), { status: "synced", pushed: 1, pulled: 0 })
+    assert.deepEqual(clientA.sync.now({ transport, replicaId: "client-a" }), { status: "synced", pushed: 1, pulled: 1 })
     assert.deepEqual(clientB.sync.now({ transport, replicaId: "client-b" }), { status: "synced", pushed: 0, pulled: 1 })
 
     assert.equal(existsSync(path.join(clientBRoot, created.relativePath)), false)
