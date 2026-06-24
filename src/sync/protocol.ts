@@ -2,6 +2,12 @@ export type SyncChangeEntityType = "note" | "folder" | "config" | "tombstone" | 
 export type SyncPushEntityType = "note" | "folder"
 export type SyncDirtyType = "upsert" | "delete" | "folder-upsert" | "folder-delete"
 
+export interface PullChangesRequest {
+  workspaceId: string
+  sinceSequence: number
+  limit: number
+}
+
 export interface PullChangesResponse {
   workspaceId: string
   fromSequence: number
@@ -46,13 +52,13 @@ export interface PushRequest {
 }
 
 export interface PushAcceptedRecord {
-  entityType: string
+  entityType: SyncPushEntityType
   entityId: string
   serverRevision: number
 }
 
 export interface PushRejectedRecord {
-  entityType: string
+  entityType: SyncPushEntityType
   entityId: string
   code: string
   message: string
@@ -128,8 +134,16 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0
 }
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return isObject(value)
+}
+
+function isMetadataRecord(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && !hasOwn(value, "body")
 }
 
 function optionalString(value: Record<string, unknown>, key: string): boolean {
@@ -156,7 +170,16 @@ export function isSyncChangeView(value: unknown): value is SyncChangeView {
     optionalString(value, "title") &&
     optionalString(value, "relativePath") &&
     optionalBoolean(value, "bodyAvailable") &&
-    isRecord(value.metadata)
+    isMetadataRecord(value.metadata)
+  )
+}
+
+export function isPullChangesRequest(value: unknown): value is PullChangesRequest {
+  return (
+    isObject(value) &&
+    isString(value.workspaceId) &&
+    isNonNegativeInteger(value.sinceSequence) &&
+    isPositiveInteger(value.limit)
   )
 }
 
@@ -186,16 +209,31 @@ export function isSyncPushRecord(value: unknown): value is SyncPushRecord {
     return false
   }
 
-  return (
-    isString(value.entityType) &&
-    syncPushEntityTypes.has(value.entityType as SyncPushEntityType) &&
-    isString(value.entityId) &&
-    isString(value.dirtyType) &&
-    syncDirtyTypes.has(value.dirtyType as SyncDirtyType) &&
-    isString(value.clientUpdatedAt) &&
-    isRecord(value.metadata) &&
-    (!hasOwn(value, "bodyUpload") || isSyncBodyUploadDescriptor(value.bodyUpload))
-  )
+  if (
+    !isString(value.entityType) ||
+    !syncPushEntityTypes.has(value.entityType as SyncPushEntityType) ||
+    !isString(value.entityId) ||
+    !isString(value.dirtyType) ||
+    !syncDirtyTypes.has(value.dirtyType as SyncDirtyType) ||
+    !isString(value.clientUpdatedAt) ||
+    !isMetadataRecord(value.metadata)
+  ) {
+    return false
+  }
+
+  const entityType = value.entityType as SyncPushEntityType
+  const dirtyType = value.dirtyType as SyncDirtyType
+  if (entityType === "note" && dirtyType !== "upsert" && dirtyType !== "delete") {
+    return false
+  }
+  if (entityType === "folder" && dirtyType !== "folder-upsert" && dirtyType !== "folder-delete") {
+    return false
+  }
+  if (hasOwn(value, "bodyUpload") && (entityType !== "note" || dirtyType !== "upsert" || !isSyncBodyUploadDescriptor(value.bodyUpload))) {
+    return false
+  }
+
+  return true
 }
 
 export function isPushRequest(value: unknown): value is PushRequest {
@@ -213,6 +251,7 @@ function isPushAcceptedRecord(value: unknown): value is PushAcceptedRecord {
   return (
     isObject(value) &&
     isString(value.entityType) &&
+    syncPushEntityTypes.has(value.entityType as SyncPushEntityType) &&
     isString(value.entityId) &&
     isNonNegativeInteger(value.serverRevision)
   )
@@ -222,6 +261,7 @@ function isPushRejectedRecord(value: unknown): value is PushRejectedRecord {
   return (
     isObject(value) &&
     isString(value.entityType) &&
+    syncPushEntityTypes.has(value.entityType as SyncPushEntityType) &&
     isString(value.entityId) &&
     isString(value.code) &&
     isString(value.message)
@@ -238,6 +278,50 @@ export function isPushResponse(value: unknown): value is PushResponse {
     Array.isArray(value.rejected) &&
     value.rejected.every(isPushRejectedRecord) &&
     isNonNegativeInteger(value.serverSequence)
+  )
+}
+
+export function isUploadNoteBodyRequest(value: unknown): value is UploadNoteBodyRequest {
+  return (
+    isObject(value) &&
+    isString(value.workspaceId) &&
+    isString(value.replicaId) &&
+    isString(value.noteId) &&
+    isString(value.contentHash) &&
+    isNonNegativeInteger(value.byteLength) &&
+    isString(value.body)
+  )
+}
+
+export function isUploadNoteBodyResponse(value: unknown): value is UploadNoteBodyResponse {
+  return (
+    isObject(value) &&
+    isString(value.noteId) &&
+    isString(value.contentHash) &&
+    isNonNegativeInteger(value.byteLength) &&
+    isBoolean(value.accepted)
+  )
+}
+
+export function isDownloadNoteBodyResponse(value: unknown): value is DownloadNoteBodyResponse {
+  return (
+    isObject(value) &&
+    isString(value.workspaceId) &&
+    isString(value.noteId) &&
+    optionalString(value, "contentHash") &&
+    (!hasOwn(value, "byteLength") || isNonNegativeInteger(value.byteLength)) &&
+    isString(value.body)
+  )
+}
+
+export function isSnapshotResponse(value: unknown): value is SnapshotResponse {
+  return (
+    isObject(value) &&
+    isString(value.workspaceId) &&
+    isNonNegativeInteger(value.serverSequence) &&
+    isBoolean(value.hasMore) &&
+    Array.isArray(value.changes) &&
+    value.changes.every(isSyncChangeView)
   )
 }
 
