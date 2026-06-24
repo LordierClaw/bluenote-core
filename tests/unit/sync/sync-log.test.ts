@@ -107,6 +107,11 @@ describe("sync log", () => {
       payload: "Do not leak direct payload.",
       text: "Do not leak direct text.",
       data: "Do not leak direct data.",
+      note: {
+        bodyText: "BODY-LEAK",
+        markdown: "MD-LEAK",
+        noteContent: "CONTENT-LEAK",
+      },
       safe: "visible",
     }), {
       noteBody: "[redacted]",
@@ -115,6 +120,11 @@ describe("sync log", () => {
       payload: "[redacted]",
       text: "[redacted]",
       data: "[redacted]",
+      note: {
+        bodyText: "[redacted]",
+        markdown: "[redacted]",
+        noteContent: "[redacted]",
+      },
       safe: "visible",
     })
   })
@@ -123,6 +133,11 @@ describe("sync log", () => {
     assert.equal(
       redactSyncLogValue("failed fetching https://sync.example.test/path?accessToken=abc&safe=value"),
       "failed fetching https://sync.example.test/path?accessToken=%5Bredacted%5D&safe=value",
+    )
+
+    assert.equal(
+      redactSyncLogValue("?accessToken=TOKEN-LEAK&safe=1"),
+      "?accessToken=%5Bredacted%5D&safe=1",
     )
 
     assert.deepEqual(redactSyncLogValue(new Error("failed fetching https://sync.example.test/path?accessToken=abc&safe=value")), {

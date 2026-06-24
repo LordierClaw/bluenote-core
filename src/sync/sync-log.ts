@@ -43,6 +43,7 @@ const redactedFieldNames = new Set([
   "apikey",
   "body",
   "bodies",
+  "bodytext",
   "clientsecret",
   "content",
   "contenttext",
@@ -52,6 +53,7 @@ const redactedFieldNames = new Set([
   "data",
   "headers",
   "idtoken",
+  "markdown",
   "notebodies",
   "notebody",
   "password",
@@ -79,7 +81,7 @@ function isRedactedFieldName(key: string): boolean {
   if (redactedFieldNames.has(normalized)) {
     return true
   }
-  return normalized.endsWith("token") || normalized.endsWith("secret") || normalized.endsWith("password") || normalized.endsWith("credential") || normalized.endsWith("credentials")
+  return normalized.endsWith("token") || normalized.endsWith("secret") || normalized.endsWith("password") || normalized.endsWith("credential") || normalized.endsWith("credentials") || normalized.endsWith("body") || normalized.endsWith("bodies") || normalized.endsWith("content")
 }
 
 function isRedactedQueryKey(key: string): boolean {
@@ -88,6 +90,18 @@ function isRedactedQueryKey(key: string): boolean {
     return true
   }
   return normalized.endsWith("token") || normalized.endsWith("secret") || normalized.endsWith("password")
+}
+
+function redactParams(rawValue: string): { value: string; changed: boolean } {
+  const params = new URLSearchParams(rawValue)
+  let changed = false
+  for (const key of [...params.keys()]) {
+    if (isRedactedQueryKey(key)) {
+      params.set(key, redacted)
+      changed = true
+    }
+  }
+  return { value: changed ? params.toString() : rawValue, changed }
 }
 
 function redactUrl(rawValue: string): string | undefined {
@@ -126,6 +140,14 @@ function redactString(value: string): string {
   const url = redactUrl(value)
   if (url !== undefined) {
     return url
+  }
+
+  if (value.startsWith("?") || value.startsWith("#")) {
+    const prefix = value.slice(0, 1)
+    const params = redactParams(value.slice(1))
+    if (params.changed) {
+      return `${prefix}${params.value}`
+    }
   }
 
   const withEmbeddedUrls = value.replace(/https?:\/\/[^\s"'<>]+/giu, (match) => redactUrl(match) ?? match)
