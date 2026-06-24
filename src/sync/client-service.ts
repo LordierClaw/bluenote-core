@@ -425,6 +425,23 @@ function clearAcceptedDirty(rootPath: string, identity: EnsureSyncDatabaseOption
   }
 }
 
+function markRejectedDirty(rootPath: string, identity: EnsureSyncDatabaseOptions, response: PushResponse): void {
+  if (response.rejected.length === 0) {
+    return
+  }
+
+  const dirty = createDirtyRecordRepository(rootPath, identity)
+  for (const record of response.rejected) {
+    dirty.markPushRejected(record.entityType, record.entityId, record.message)
+  }
+}
+
+function rejectedPushMessage(response: PushResponse): string {
+  return response.rejected
+    .map((record) => `${record.entityType}:${record.entityId} ${record.code}: ${record.message}`)
+    .join("; ")
+}
+
 function isOwnEcho(change: SyncChangeView, replicaId: string): boolean {
   return change.sourceReplicaId === replicaId
 }
@@ -471,6 +488,10 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
         const pushResponse = options.transport.push(buildPushRequest(rootPath, options.workspaceId, replicaId, sinceSequence, dirtyRecords))
         pushed = pushResponse.accepted.length
         clearAcceptedDirty(rootPath, identity, pushResponse)
+        markRejectedDirty(rootPath, identity, pushResponse)
+        if (pushResponse.rejected.length > 0) {
+          throw new UsageError(`Sync push rejected by server: ${rejectedPushMessage(pushResponse)}`)
+        }
         const pushedAt = new Date().toISOString()
         while (pushResponse.serverSequence > sinceSequence) {
           const response = options.transport.pull({ workspaceId: options.workspaceId, sinceSequence, limit: pullLimit })

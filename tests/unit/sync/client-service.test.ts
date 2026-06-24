@@ -117,6 +117,42 @@ describe("sync client service", () => {
     })
   })
 
+  test("sync cycle surfaces rejected pushes and keeps dirty records pending", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      dirty.markDirty({
+        entityType: "note",
+        entityId: "note-rejected",
+        dirtyType: "delete",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/rejected.md" },
+      })
+      const transport = makeTransport({
+        push: (request) => ({
+          accepted: [],
+          replacedByServer: [],
+          rejected: [{
+            entityType: "note",
+            entityId: "note-rejected",
+            code: "PUSH_REJECTED",
+            message: "destination path already exists",
+          }],
+          serverSequence: request.baseSequence,
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /destination path already exists/,
+      )
+      const [pending] = dirty.listDirtyRecords()
+      assert.equal(pending.entityId, "note-rejected")
+      assert.equal(pending.attempts, 1)
+      assert.match(pending.lastError ?? "", /destination path already exists/)
+    })
+  })
+
   test("archiving a synced note pushes a delete tombstone instead of an archived upsert", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

@@ -38,6 +38,16 @@ export function createDirtyRecordRepository(rootPath, dbIdentity) {
                 handle.db.run("DELETE FROM dirty_records WHERE entityType = ? AND entityId = ?", [entityType, entityId]);
             }, { save: true });
         },
+        markPushRejected(entityType, entityId, errorMessage) {
+            withSyncDatabase(rootPath, dbIdentity, (handle) => {
+                handle.db.run(`
+            UPDATE dirty_records
+            SET attempts = attempts + 1,
+                lastError = ?
+            WHERE entityType = ? AND entityId = ?
+          `, [errorMessage, entityType, entityId]);
+            }, { save: true });
+        },
     };
 }
 //# sourceMappingURL=dirty-repository.js.map

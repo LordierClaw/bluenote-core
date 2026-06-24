@@ -19,6 +19,7 @@ export interface DirtyRecordRepository {
     markDirty(record: DirtyRecordInput): void;
     listDirtyRecords(): DirtyRecord[];
     clearDirtyRecord(entityType: string, entityId: string): void;
+    markPushRejected(entityType: string, entityId: string, errorMessage: string): void;
 }
 export declare function createDirtyRecordRepository(rootPath: string, dbIdentity: EnsureSyncDatabaseOptions): DirtyRecordRepository;
 //# sourceMappingURL=dirty-repository.d.ts.map
