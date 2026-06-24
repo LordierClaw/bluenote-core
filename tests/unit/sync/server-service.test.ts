@@ -135,6 +135,59 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
   })
 })
 
+test("server rejects stale pushes before mutating note files", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    const initial = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-stale": "Initial body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-stale",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "stale-note",
+          title: "Stale Note",
+          relativePath: "note/stale-note.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }],
+    })
+    assert.equal(initial.rejected.length, 0)
+
+    const stale = server.acceptPush({
+      workspaceId,
+      replicaId: "client-b",
+      baseSequence: 0,
+      noteBodies: { "note-stale": "Stale overwrite.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-stale",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+        metadata: {
+          key: "stale-note",
+          title: "Stale Note",
+          relativePath: "note/stale-note.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:01:00.000Z",
+        },
+      }],
+    })
+
+    assert.deepEqual(stale.accepted, [])
+    assert.equal(stale.rejected.length, 1)
+    assert.match(stale.rejected[0].message, /stale/i)
+    assert.equal(stale.serverSequence, initial.serverSequence)
+    assert.equal(readFileSync(path.join(rootPath, "note", "stale-note.md"), "utf8"), "Initial body.\n")
+    assert.equal(readServerChanges(rootPath).length, 1)
+  })
+})
+
 test("server accepts synced draft note upserts", async () => {
   await withRoot((rootPath) => {
     const server = createSyncServerService({ rootPath, workspaceId })
@@ -282,6 +335,45 @@ test("server rejects pushed note relocations through symlinked destination paren
       assert.equal(response.rejected.length, 1)
       assert.equal(existsSync(path.join(outsidePath, "escaped.md")), false)
       assert.equal(readFileSync(path.join(rootPath, "note", "safe-note.md"), "utf8"), "Original body.\n")
+    } finally {
+      await rm(outsidePath, { recursive: true, force: true })
+    }
+  })
+})
+
+test("server rejects body downloads whose note path is a symlink", async () => {
+  await withRoot(async (rootPath) => {
+    const outsidePath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-server-download-outside-"))
+    try {
+      const server = createSyncServerService({ rootPath, workspaceId })
+      const initial = server.acceptPush({
+        workspaceId,
+        replicaId: "client-a",
+        baseSequence: 0,
+        noteBodies: { "note-download-escape": "Original body.\n" },
+        records: [{
+          entityType: "note",
+          entityId: "note-download-escape",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: {
+            key: "download-victim",
+            title: "Download Victim",
+            relativePath: "note/download-victim.md",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        }],
+      })
+      assert.equal(initial.rejected.length, 0)
+      writeFileSync(path.join(outsidePath, "secret.md"), "Outside secret.\n")
+      await rm(path.join(rootPath, "note", "download-victim.md"), { force: true })
+      symlinkSync(path.join(outsidePath, "secret.md"), path.join(rootPath, "note", "download-victim.md"))
+
+      assert.throws(
+        () => server.downloadNoteBody("note-download-escape", { workspaceId }),
+        /must not be a symlink/,
+      )
     } finally {
       await rm(outsidePath, { recursive: true, force: true })
     }

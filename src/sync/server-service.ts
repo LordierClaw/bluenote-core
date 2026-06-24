@@ -631,6 +631,23 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
 
         handle.db.run("BEGIN IMMEDIATE TRANSACTION")
         try {
+          const currentServerSequence = latestServerSequence(handle)
+          if (request.baseSequence < currentServerSequence) {
+            const rejected = request.records.map((record): PushRejectedRecord => ({
+              entityType: record.entityType,
+              entityId: record.entityId,
+              code: "STALE_BASE_SEQUENCE",
+              message: `Stale sync push baseSequence ${request.baseSequence}; server is at sequence ${currentServerSequence}. Pull latest changes before pushing again.`,
+            }))
+            handle.db.run("COMMIT")
+            return {
+              accepted: [],
+              replacedByServer: [],
+              rejected,
+              serverSequence: currentServerSequence,
+            }
+          }
+
           const latestRevisions = new Map<string, number>()
 
           for (const record of request.records) {
@@ -798,6 +815,7 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
       assertWorkspace(options.workspaceId, request?.workspaceId)
       const sidecar = createSidecarRepository(rootPath).readByNoteId(noteId)
       const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath))
+      assertPathAndParentsAreNotSymlinks(rootPath, notePath)
       const body = createNoteRepository(rootPath).read(notePath).body
       const metadataRows = withSyncDatabase(rootPath, dbIdentity, (handle) => handle.db.exec(
         `
