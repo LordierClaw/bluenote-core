@@ -54,7 +54,7 @@ test("core sync moves a note from client A to server to client B and propagates 
         return server.acceptPush(request)
       },
       downloadNoteBody(noteId) {
-        return server.downloadNoteBody(noteId)
+        return server.downloadNoteBody(noteId, { workspaceId })
       },
     }
 

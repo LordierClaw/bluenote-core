@@ -51,7 +51,7 @@ export interface SyncServerPushRequest extends PushRequest {
 export interface SyncServerService {
   acceptPush(request: SyncServerPushRequest): PushResponse
   getChanges(request: PullChangesRequest): PullChangesResponse
-  downloadNoteBody(noteId: string): DownloadNoteBodyResponse
+  downloadNoteBody(noteId: string, request?: { workspaceId?: string }): DownloadNoteBodyResponse
 }
 
 interface AppliedChange {
@@ -422,6 +422,8 @@ function deleteNote(rootPath: string, record: SyncPushRecord): MutationResult<{ 
 
   try {
     if (existingSidecar !== null && notePath !== null) {
+      assertPathAndParentsAreNotSymlinks(rootPath, notePath)
+      assertPathAndParentsAreNotSymlinks(rootPath, sidecarPath)
       if (fs.existsSync(notePath)) {
         createNoteRepository(rootPath).delete(notePath)
       } else if (fs.existsSync(sidecarPath)) {
@@ -592,7 +594,7 @@ function toChangeView(row: unknown[]): SyncChangeView {
   }
 }
 
-function assertWorkspace(expectedWorkspaceId: string, receivedWorkspaceId: string): void {
+function assertWorkspace(expectedWorkspaceId: string, receivedWorkspaceId: string | undefined): void {
   if (receivedWorkspaceId !== expectedWorkspaceId) {
     throw new UsageError(`Sync workspaceId mismatch.`, {
       hint: `Expected workspaceId '${expectedWorkspaceId}' but received '${receivedWorkspaceId}'.`,
@@ -792,7 +794,8 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
       })
     },
 
-    downloadNoteBody(noteId) {
+    downloadNoteBody(noteId, request) {
+      assertWorkspace(options.workspaceId, request?.workspaceId)
       const sidecar = createSidecarRepository(rootPath).readByNoteId(noteId)
       const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath))
       const body = createNoteRepository(rootPath).read(notePath).body

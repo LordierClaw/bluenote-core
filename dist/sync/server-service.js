@@ -313,6 +313,8 @@ function deleteNote(rootPath, record) {
     const rollback = makeRollback(snapshots);
     try {
         if (existingSidecar !== null && notePath !== null) {
+            assertPathAndParentsAreNotSymlinks(rootPath, notePath);
+            assertPathAndParentsAreNotSymlinks(rootPath, sidecarPath);
             if (fs.existsSync(notePath)) {
                 createNoteRepository(rootPath).delete(notePath);
             }
@@ -648,7 +650,8 @@ export function createSyncServerService(options) {
                 };
             });
         },
-        downloadNoteBody(noteId) {
+        downloadNoteBody(noteId, request) {
+            assertWorkspace(options.workspaceId, request?.workspaceId);
             const sidecar = createSidecarRepository(rootPath).readByNoteId(noteId);
             const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath));
             const body = createNoteRepository(rootPath).read(notePath).body;

@@ -123,13 +123,15 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
     assert.equal("body" in changes.changes[0], false)
     assert.equal("body" in changes.changes[0].metadata, false)
 
-    assert.deepEqual(server.downloadNoteBody("note-1"), {
+    assert.deepEqual(server.downloadNoteBody("note-1", { workspaceId }), {
       workspaceId,
       noteId: "note-1",
       body: "# Body\n\nHello from a client.\n",
       contentHash: "sha256:client-body",
       byteLength: 29,
     })
+    assert.throws(() => server.downloadNoteBody("note-1", { workspaceId: "other-workspace" }), /workspaceId mismatch/)
+    assert.throws(() => server.downloadNoteBody("note-1"), /workspaceId mismatch/)
   })
 })
 
@@ -280,6 +282,57 @@ test("server rejects pushed note relocations through symlinked destination paren
       assert.equal(response.rejected.length, 1)
       assert.equal(existsSync(path.join(outsidePath, "escaped.md")), false)
       assert.equal(readFileSync(path.join(rootPath, "note", "safe-note.md"), "utf8"), "Original body.\n")
+    } finally {
+      await rm(outsidePath, { recursive: true, force: true })
+    }
+  })
+})
+
+test("server rejects deletes whose sidecar path resolves through a symlinked parent", async () => {
+  await withRoot(async (rootPath) => {
+    const outsidePath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-server-delete-outside-"))
+    try {
+      const server = createSyncServerService({ rootPath, workspaceId })
+      const initial = server.acceptPush({
+        workspaceId,
+        replicaId: "client-a",
+        baseSequence: 0,
+        noteBodies: { "note-delete-escape": "Original body.\n" },
+        records: [{
+          entityType: "note",
+          entityId: "note-delete-escape",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: {
+            key: "victim",
+            title: "Victim",
+            relativePath: "note/link/victim.md",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        }],
+      })
+      assert.equal(initial.rejected.length, 0)
+      await rm(path.join(rootPath, "note", "link"), { recursive: true, force: true })
+      writeFileSync(path.join(outsidePath, "victim.md"), "Outside body.\n")
+      symlinkSync(outsidePath, path.join(rootPath, "note", "link"), "dir")
+
+      const response = server.acceptPush({
+        workspaceId,
+        replicaId: "client-a",
+        baseSequence: initial.serverSequence,
+        records: [{
+          entityType: "note",
+          entityId: "note-delete-escape",
+          dirtyType: "delete",
+          clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+          metadata: { relativePath: "note/link/victim.md" },
+        }],
+      })
+
+      assert.equal(response.accepted.length, 0)
+      assert.equal(response.rejected.length, 1)
+      assert.equal(readFileSync(path.join(outsidePath, "victim.md"), "utf8"), "Outside body.\n")
     } finally {
       await rm(outsidePath, { recursive: true, force: true })
     }

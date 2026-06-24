@@ -15,7 +15,9 @@ export interface SyncServerPushRequest extends PushRequest {
 export interface SyncServerService {
     acceptPush(request: SyncServerPushRequest): PushResponse;
     getChanges(request: PullChangesRequest): PullChangesResponse;
-    downloadNoteBody(noteId: string): DownloadNoteBodyResponse;
+    downloadNoteBody(noteId: string, request?: {
+        workspaceId?: string;
+    }): DownloadNoteBodyResponse;
 }
 export declare function createSyncServerService(options: CreateSyncServerServiceOptions): SyncServerService;
 //# sourceMappingURL=server-service.d.ts.map
