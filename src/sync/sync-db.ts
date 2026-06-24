@@ -62,7 +62,9 @@ export interface EnsureSyncDatabaseResult {
   schemaVersion: number
 }
 
-interface SyncDatabaseHandle {
+export type SyncJsonObject = Record<string, unknown>
+
+export interface SyncDatabaseHandle {
   db: InstanceType<typeof SQL.Database>
   syncDatabasePath: string
 }
@@ -74,7 +76,7 @@ export function getSyncDatabasePath(rootPath: string): string {
   return assertPathInsideRoot(syncDirectoryPath, path.join(syncDirectoryPath, APP_STATE_SYNC_DATABASE_FILENAME))
 }
 
-function openSyncDatabase(rootPath: string): SyncDatabaseHandle {
+export function openSyncDatabase(rootPath: string): SyncDatabaseHandle {
   ensureManagedRoot(rootPath)
   const syncDatabasePath = getSyncDatabasePath(rootPath)
   mkdirSync(path.dirname(syncDatabasePath), { recursive: true })
@@ -92,7 +94,7 @@ function openSyncDatabase(rootPath: string): SyncDatabaseHandle {
   }
 }
 
-function saveSyncDatabase(handle: SyncDatabaseHandle): void {
+export function saveSyncDatabase(handle: SyncDatabaseHandle): void {
   const syncDirectoryPath = path.dirname(handle.syncDatabasePath)
   const temporaryPath = path.join(syncDirectoryPath, `${path.basename(handle.syncDatabasePath)}.tmp-${process.pid}-${Date.now()}`)
 
@@ -156,6 +158,28 @@ function ensureMetadataValue(db: InstanceType<typeof SQL.Database>, key: string,
   }
 }
 
+export function serializeSyncMetadata(metadata: SyncJsonObject | null | undefined): string {
+  return JSON.stringify(metadata ?? null)
+}
+
+export function parseSyncMetadata(value: string | null): SyncJsonObject | null {
+  if (value === null) {
+    return null
+  }
+
+  const parsed = JSON.parse(value) as unknown
+  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as SyncJsonObject) : null
+}
+
+function ensureColumn(db: InstanceType<typeof SQL.Database>, tableName: string, columnName: string, definition: string): void {
+  const rows = db.exec(`PRAGMA table_info(${tableName})`)[0]?.values ?? []
+  const hasColumn = (rows as unknown[][]).some((row: unknown[]) => row[1] === columnName)
+
+  if (!hasColumn) {
+    db.run(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`)
+  }
+}
+
 function bootstrapSyncSchema(handle: SyncDatabaseHandle, options: EnsureSyncDatabaseOptions): void {
   const { db } = handle
 
@@ -206,9 +230,12 @@ function bootstrapSyncSchema(handle: SyncDatabaseHandle, options: EnsureSyncData
         markedAt TEXT NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0,
         lastError TEXT,
+        metadataJson TEXT NOT NULL DEFAULT 'null',
         PRIMARY KEY (entityType, entityId)
       )
     `)
+
+    ensureColumn(db, "dirty_records", "metadataJson", "metadataJson TEXT NOT NULL DEFAULT 'null'")
 
     db.run(`
       CREATE TABLE IF NOT EXISTS tombstones (
