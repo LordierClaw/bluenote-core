@@ -83,6 +83,7 @@ export * from "./storage/sidecar-schema"
 export * from "./storage/state-manifest"
 export * from "./sync/core-sync"
 export * from "./sync/types"
+export * from "./sync/protocol"
 export * from "./sync/dirty-repository"
 export * from "./sync/folder-repository"
 export {
