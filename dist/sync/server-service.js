@@ -165,55 +165,62 @@ function upsertNote(rootPath, record, body) {
     const sidecarPath = sidecars.getSidecarPathByNoteId(record.entityId);
     const existingPath = sidecar === null ? null : assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath));
     const snapshots = snapshotFiles([targetPath, sidecarPath, ...(existingPath === null ? [] : [existingPath])]);
-    ensureNormalFolder(rootPath, metadata.relativePath);
-    assertRelativePathAvailable(rootPath, metadata.relativePath, record.entityId);
-    if (sidecar === null) {
-        repository.create({
-            noteId: record.entityId,
-            body,
-            frontmatter: {
-                id: metadata.key,
-                schemaVersion: 1,
-                title: metadata.title,
-                mode: "plain",
-                tags: [],
-                createdAt: metadata.createdAt,
-                updatedAt: metadata.updatedAt,
-            },
-            destination: { type: "normal", folderRelativePath: path.posix.dirname(metadata.relativePath) },
-        });
-    }
-    else {
-        if (sidecar.relativePath !== metadata.relativePath || sidecar.key !== metadata.key) {
-            const nextPath = targetPath;
-            if (nextPath !== existingPath && fs.existsSync(nextPath)) {
-                throw new UsageError(`Cannot sync note '${record.entityId}' to '${metadata.relativePath}'.`, {
-                    hint: "The destination Markdown file already exists.",
-                });
-            }
-            fs.mkdirSync(path.dirname(nextPath), { recursive: true });
-            fs.writeFileSync(nextPath, serializePlainNote({ body, sourcePath: metadata.relativePath }), "utf8");
-            if (nextPath !== existingPath && existingPath !== null && fs.existsSync(existingPath)) {
-                fs.rmSync(existingPath);
-            }
-            sidecars.write({
-                ...sidecar,
-                key: metadata.key,
-                title: metadata.title,
-                description: createNoteDescription(body),
-                relativePath: metadata.relativePath,
-                updatedAt: metadata.updatedAt,
+    const rollback = makeRollback(snapshots);
+    try {
+        ensureNormalFolder(rootPath, metadata.relativePath);
+        assertRelativePathAvailable(rootPath, metadata.relativePath, record.entityId);
+        if (sidecar === null) {
+            repository.create({
+                noteId: record.entityId,
+                body,
+                frontmatter: {
+                    id: metadata.key,
+                    schemaVersion: 1,
+                    title: metadata.title,
+                    mode: "plain",
+                    tags: [],
+                    createdAt: metadata.createdAt,
+                    updatedAt: metadata.updatedAt,
+                },
+                destination: { type: "normal", folderRelativePath: path.posix.dirname(metadata.relativePath) },
             });
         }
         else {
-            repository.syncEditedNote(existingPath ?? targetPath, {
-                title: metadata.title,
-                body,
-                updatedAt: metadata.updatedAt,
-            });
+            if (sidecar.relativePath !== metadata.relativePath || sidecar.key !== metadata.key) {
+                const nextPath = targetPath;
+                if (nextPath !== existingPath && fs.existsSync(nextPath)) {
+                    throw new UsageError(`Cannot sync note '${record.entityId}' to '${metadata.relativePath}'.`, {
+                        hint: "The destination Markdown file already exists.",
+                    });
+                }
+                fs.mkdirSync(path.dirname(nextPath), { recursive: true });
+                fs.writeFileSync(nextPath, serializePlainNote({ body, sourcePath: metadata.relativePath }), "utf8");
+                if (nextPath !== existingPath && existingPath !== null && fs.existsSync(existingPath)) {
+                    fs.rmSync(existingPath);
+                }
+                sidecars.write({
+                    ...sidecar,
+                    key: metadata.key,
+                    title: metadata.title,
+                    description: createNoteDescription(body),
+                    relativePath: metadata.relativePath,
+                    updatedAt: metadata.updatedAt,
+                });
+            }
+            else {
+                repository.syncEditedNote(existingPath ?? targetPath, {
+                    title: metadata.title,
+                    body,
+                    updatedAt: metadata.updatedAt,
+                });
+            }
         }
     }
-    return { value: metadata, rollback: makeRollback(snapshots) };
+    catch (error) {
+        rollback();
+        throw error;
+    }
+    return { value: metadata, rollback };
 }
 function deleteNote(rootPath, record) {
     const pushedMetadata = metadataWithoutBody(record.metadata);
@@ -225,13 +232,20 @@ function deleteNote(rootPath, record) {
     const notePath = existingSidecar === null ? null : assertPathInsideRoot(rootPath, path.join(rootPath, existingSidecar.relativePath));
     const sidecarPath = sidecars.getSidecarPathByNoteId(record.entityId);
     const snapshots = snapshotFiles([sidecarPath, ...(notePath === null ? [] : [notePath])]);
-    if (existingSidecar !== null && notePath !== null) {
-        if (fs.existsSync(notePath)) {
-            createNoteRepository(rootPath).delete(notePath);
+    const rollback = makeRollback(snapshots);
+    try {
+        if (existingSidecar !== null && notePath !== null) {
+            if (fs.existsSync(notePath)) {
+                createNoteRepository(rootPath).delete(notePath);
+            }
+            else if (fs.existsSync(sidecarPath)) {
+                fs.rmSync(sidecarPath);
+            }
         }
-        else if (fs.existsSync(sidecarPath)) {
-            fs.rmSync(sidecarPath);
-        }
+    }
+    catch (error) {
+        rollback();
+        throw error;
     }
     return {
         value: {
@@ -243,7 +257,7 @@ function deleteNote(rootPath, record) {
                 previousTitle: title,
             },
         },
-        rollback: makeRollback(snapshots),
+        rollback,
     };
 }
 function latestServerRevision(handle, entityType, entityId) {

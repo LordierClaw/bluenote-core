@@ -322,6 +322,52 @@ test("server rolls back files when change metadata cannot be serialized", async 
   })
 })
 
+test("server rolls back relocation files when sidecar validation fails", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-a": "Original A.\n" },
+      records: [
+        {
+          entityType: "note",
+          entityId: "note-a",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: { key: "note-a", title: "Note A", relativePath: "note/note-a.md" },
+          bodyUpload: { contentHash: "sha256:a", byteLength: 12 },
+        },
+      ],
+    })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 1,
+      noteBodies: { "note-a": "Relocation should roll back.\n" },
+      records: [
+        {
+          entityType: "note",
+          entityId: "note-a",
+          dirtyType: "upsert",
+          clientUpdatedAt: "not-a-date",
+          metadata: { key: "note-a-renamed", title: "Bad Relocation", relativePath: "note/note-a-renamed.md", updatedAt: "not-a-date" },
+          bodyUpload: { contentHash: "sha256:bad-relocation", byteLength: 30 },
+        },
+      ],
+    })
+
+    assert.equal(response.accepted.length, 0)
+    assert.equal(response.rejected.length, 1)
+    assert.equal(readFileSync(path.join(rootPath, "note", "note-a.md"), "utf8"), "Original A.\n")
+    assert.equal(existsSync(path.join(rootPath, "note", "note-a-renamed.md")), false)
+    assert.equal(createSidecarRepository(rootPath).readByNoteId("note-a").relativePath, "note/note-a.md")
+    assert.equal(server.getChanges({ workspaceId, sinceSequence: 1, limit: 10 }).changes.length, 0)
+  })
+})
+
 test("server rejects invalid delete metadata paths without tombstones or changes", async () => {
   await withRoot((rootPath) => {
     const server = createSyncServerService({ rootPath, workspaceId })
