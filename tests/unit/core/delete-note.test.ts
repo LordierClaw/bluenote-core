@@ -6,6 +6,8 @@ import { access, readFile } from "node:fs/promises"
 import { deleteNote } from "../../../src/core/delete-note"
 import { enableSyncClientMode, listDirtyRecords, listTombstones, withTempRoot, writeSidecarNote } from "./sync-dirty-test-helpers"
 
+const deletionClock = { now: () => new Date("2026-06-08T09:30:00.000Z") }
+
 test("deleteNote removes a note when force is provided", async () => {
   await withTempRoot("bluenote-delete-note-", async (rootPath) => {
     await writeSidecarNote(rootPath, { noteId: "note_delete_123", key: "obsolete", title: "Obsolete", relativePath: "note/work/obsolete.md" })
@@ -23,13 +25,13 @@ test("deleteNote records a tombstone and dirty delete in sync-client mode", asyn
     await enableSyncClientMode(rootPath)
     await writeSidecarNote(rootPath, { noteId: "note_delete_dirty", key: "obsolete", title: "Obsolete", relativePath: "note/work/obsolete.md" })
 
-    deleteNote({ override: rootPath, selector: "obsolete", force: true })
+    deleteNote({ override: rootPath, selector: "obsolete", force: true, clock: deletionClock })
 
     assert.deepEqual(listTombstones(rootPath), [
       {
         entityType: "note",
         entityId: "note_delete_dirty",
-        deletedAt: "2026-06-02T00:00:00.000Z",
+        deletedAt: "2026-06-08T09:30:00.000Z",
         serverRevision: null,
         sourceReplicaId: null,
         previousRelativePath: "note/work/obsolete.md",
@@ -41,7 +43,7 @@ test("deleteNote records a tombstone and dirty delete in sync-client mode", asyn
         entityType: "note",
         entityId: "note_delete_dirty",
         dirtyType: "delete",
-        markedAt: "2026-06-02T00:00:00.000Z",
+        markedAt: "2026-06-08T09:30:00.000Z",
         attempts: 0,
         lastError: null,
         metadata: {

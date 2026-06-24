@@ -94,6 +94,30 @@ test("createNote marks the new note dirty in explicit sync-client mode", async (
   })
 })
 
+test("createNote marks canonical destination folder dirty in sync-client mode", async () => {
+  await withTempRoot("bluenote-create-note-sync-folder-canonical-", async (rootPath) => {
+    await enableSyncClientMode(rootPath)
+    await mkdir(path.join(rootPath, "note", "projects"), { recursive: true })
+
+    const created = createNote({
+      override: rootPath,
+      type: "normal",
+      title: "Project Plan",
+      destinationFolder: "note/projects/",
+      body: "Plan body.\n",
+      noteIdGenerator: () => "note_sync_folder_dirty",
+      randomSource: () => 46655,
+      clock: fixedClock("2026-06-06T12:00:00.000Z"),
+    })
+
+    assert.equal(created.relativePath, "note/projects/project-plan-000zzz.md")
+    assert.deepEqual(listDirtyRecords(rootPath).map((record) => [record.entityType, record.entityId]), [
+      ["folder", "note/projects"],
+      ["note", "note_sync_folder_dirty"],
+    ])
+  })
+})
+
 test("createNote still writes the note if sync dirty bookkeeping is temporarily unavailable", async () => {
   await withTempRoot("bluenote-create-note-sync-dirty-failure-", async (rootPath) => {
     await enableSyncClientMode(rootPath)

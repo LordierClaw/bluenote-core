@@ -8,10 +8,12 @@ import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutat
 import { rebuildIndexes } from "./rebuild-indexes"
 import { selectNote } from "./select-note"
 import type { NoteVisibilityOptions } from "./note-visibility"
+import { systemClock, type Clock } from "../platform/clock"
 
 export interface DeleteNoteOptions extends ResolveBlueNoteRootOptions, NoteVisibilityOptions {
   selector: string
   force?: boolean
+  clock?: Clock
 }
 
 export interface DeleteNoteSummary {
@@ -31,7 +33,7 @@ export function deleteNote(options: DeleteNoteOptions): DeleteNoteSummary {
   const repository = createNoteRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility })
   const syncEntityId = getNoteSyncEntityId(rootPath, selected)
-  const deletedAt = selected.frontmatter.updatedAt
+  const deletedAt = (options.clock ?? systemClock).now().toISOString()
   const deleted = repository.delete(path.join(rootPath, selected.sourcePath))
   const rebuildSummary = rebuildIndexes({ override: rootPath })
 

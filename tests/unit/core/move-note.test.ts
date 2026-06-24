@@ -150,7 +150,7 @@ test("moveNote marks the moved note and destination folder dirty in sync-client 
     moveNote({
       override: rootPath,
       selector: "roadmap",
-      destinationFolder: "note/projects",
+      destinationFolder: "note/projects/",
       updatedAt: "2026-06-07T11:00:00.000Z",
     })
 

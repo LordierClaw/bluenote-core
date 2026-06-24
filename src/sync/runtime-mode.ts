@@ -2,6 +2,7 @@ import path from "node:path"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 
 import { APP_STATE_SYNC_DIRECTORY } from "../config/root"
+import { UsageError } from "../core/errors"
 import { assertPathInsideRoot } from "../platform/path-safety"
 import { ensureManagedRoot } from "../storage/root-layout"
 
@@ -28,15 +29,23 @@ export function getSyncRuntimeModePath(rootPath: string): string {
 
 function parseRuntimeMode(value: unknown): SyncRuntimeModeConfig {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return { mode: "standalone" }
+    throw new UsageError("Invalid sync runtime mode config.", {
+      hint: "Remove .data/sync/runtime-mode.json or recreate it with mode 'standalone' or 'sync-client'.",
+    })
   }
 
   const record = value as Record<string, unknown>
+  if (record.mode === "standalone" || record.mode === undefined) {
+    return { mode: "standalone" }
+  }
+
   if (record.mode === "sync-client" && typeof record.workspaceId === "string" && record.workspaceId.trim().length > 0) {
     return { mode: "sync-client", workspaceId: record.workspaceId }
   }
 
-  return { mode: "standalone" }
+  throw new UsageError("Invalid sync runtime mode config.", {
+    hint: "Remove .data/sync/runtime-mode.json or recreate it with mode 'standalone' or 'sync-client'.",
+  })
 }
 
 export function readSyncRuntimeMode(rootPath: string): SyncRuntimeModeConfig {
@@ -48,8 +57,15 @@ export function readSyncRuntimeMode(rootPath: string): SyncRuntimeModeConfig {
 
   try {
     return parseRuntimeMode(JSON.parse(readFileSync(runtimeModePath, "utf8")) as unknown)
-  } catch {
-    return { mode: "standalone" }
+  } catch (error) {
+    if (error instanceof UsageError) {
+      throw error
+    }
+
+    throw new UsageError("Could not read sync runtime mode config.", {
+      hint: "Remove .data/sync/runtime-mode.json or recreate it with valid JSON.",
+      cause: error,
+    })
   }
 }
 

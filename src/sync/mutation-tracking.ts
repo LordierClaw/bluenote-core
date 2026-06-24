@@ -65,8 +65,18 @@ function countPending(rootPath: string, workspaceId: string): number {
   return createDirtyRecordRepository(rootPath, { role: "client", workspaceId }).listDirtyRecords().length
 }
 
+function normalizeFolderRelativePath(relativePath: string): string {
+  return relativePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+}
+
 export function recordSyncMutationBestEffort(rootPath: string, input: SyncMutationInput): void {
-  const runtimeMode = getSyncClientRuntimeMode(rootPath)
+  let runtimeMode: ReturnType<typeof getSyncClientRuntimeMode>
+  try {
+    runtimeMode = getSyncClientRuntimeMode(rootPath)
+  } catch (error) {
+    console.warn(error instanceof Error ? error.message : "Could not read sync runtime mode config.")
+    return
+  }
 
   if (runtimeMode === null) {
     return
@@ -79,17 +89,18 @@ export function recordSyncMutationBestEffort(rootPath: string, input: SyncMutati
     const tombstoneRepository = createTombstoneRepository(rootPath, identity)
 
     for (const folder of input.folders ?? []) {
+      const relativePath = normalizeFolderRelativePath(folder.relativePath)
       folderRepository.upsertFolder({
-        relativePath: folder.relativePath,
+        relativePath,
         createdAt: folder.markedAt,
         updatedAt: folder.markedAt,
       })
       dirtyRepository.markDirty({
         entityType: "folder",
-        entityId: folder.relativePath,
+        entityId: relativePath,
         dirtyType: "upsert",
         markedAt: folder.markedAt,
-        metadata: { relativePath: folder.relativePath },
+        metadata: { relativePath },
       })
     }
 
