@@ -77,6 +77,17 @@ describe("package boundary enforcement", () => {
     assert.equal(packageJson.types, "./dist/index.d.ts")
   })
 
+  test("README documents public core sync primitive boundaries", async () => {
+    const readme = await read("README.md")
+
+    assert.match(readme, /standalone remains the default/i)
+    assert.match(readme, /schema 3/i)
+    assert.match(readme, /sync APIs are core primitives/i)
+    assert.match(readme, /not full hosted auth\/security/i)
+    assert.match(readme, /daemon auth\/TLS are out of scope for v1/i)
+    assert.match(readme, /distribution CLI owns `bluenote sync/i)
+  })
+
   test("core remains headless and does not import terminal UI/client code", async () => {
     const files = await collectTsFiles("src")
     const violations: string[] = []
