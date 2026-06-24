@@ -50,6 +50,7 @@ const REQUIRED_SIDECAR_FIELDS = [
 const OPTIONAL_SIDECAR_FIELDS = ["noteId", "ai"] as const
 const AI_FIELDS = ["description"] as const
 const AI_DESCRIPTION_FIELDS = ["lastProcessedAt"] as const
+const STORAGE_SAFE_NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 
 function inferNoteType(relativePath: string, archivedAt: string | null): NoteType {
   if (archivedAt !== null || relativePath.startsWith(".data/archive/")) {
@@ -194,8 +195,14 @@ function validateNoteIdMetadata(
     return undefined
   }
 
-  if (typeof record.noteId !== "string" || record.noteId.trim() === "") {
-    throw new InvalidFrontmatterError(`Invalid ${validationKind} in ${sourcePath}: 'noteId' must be a non-empty string.`)
+  if (
+    typeof record.noteId !== "string"
+    || record.noteId.trim() === ""
+    || !STORAGE_SAFE_NOTE_ID_PATTERN.test(record.noteId)
+  ) {
+    throw new InvalidFrontmatterError(
+      `Invalid ${validationKind} in ${sourcePath}: 'noteId' must be a non-empty storage-safe string.`,
+    )
   }
 
   return record.noteId

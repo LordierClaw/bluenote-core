@@ -1,11 +1,9 @@
 import { createHash } from "node:crypto"
-import { existsSync } from "node:fs"
 
 import { SelectorNotFoundError } from "../core/errors"
 import { selectNote } from "../core/select-note"
 import { systemClock, type Clock } from "../platform/clock"
 import { createNoteRepository } from "../storage/note-repository"
-import { createSidecarRepository } from "../storage/sidecar-repository"
 import { createAiQueueRepository, type AiQueueJob, type DescribeNoteJob } from "./queue-repository"
 
 export interface DescribeNoteQueueInput {
@@ -159,20 +157,13 @@ export function dropDescribeNoteJobIfNoteMissing(rootPath: string, job: AiQueueJ
     return false
   }
 
-  let key = job.key
   try {
-    const selected = selectNote({ repository: createNoteRepository(rootPath), selector: job.key, visibility: "all" })
-    key = selected.frontmatter.id
+    selectNote({ repository: createNoteRepository(rootPath), selector: job.key, visibility: "all" })
   } catch (error) {
     if (error instanceof SelectorNotFoundError) {
       return removeDescribeNoteJob(rootPath, job.key)
     }
     throw error
-  }
-
-  const sidecars = createSidecarRepository(rootPath)
-  if (!existsSync(sidecars.getSidecarPath(key))) {
-    return removeDescribeNoteJob(rootPath, job.key)
   }
 
   return false

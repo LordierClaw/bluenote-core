@@ -319,7 +319,7 @@ test("sidecar repository rejects keys and note ids that escape .data/notes", asy
           key: "safe-key",
           relativePath: "note/safe-key.md",
         }),
-      /outside the managed root/i,
+      /noteId/i,
     )
   } finally {
     await rm(rootPath, { recursive: true, force: true })

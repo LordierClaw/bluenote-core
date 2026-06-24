@@ -219,6 +219,7 @@ function createPlainNoteMarkdown(relativePath: string, body: string): string {
 
 function noteKeyExists(rootPath: string, key: string): boolean {
   const notePaths: string[] = []
+  const sidecars = createSidecarRepository(rootPath)
 
   for (const notesPath of [getNormalNotesPath(rootPath), getDraftNotesPath(rootPath)]) {
     if (!fs.existsSync(notesPath)) {
@@ -228,7 +229,23 @@ function noteKeyExists(rootPath: string, key: string): boolean {
     collectMarkdownFiles(rootPath, notesPath, notePaths)
   }
 
-  return notePaths.some((notePath) => keyFromNotePath(notePath) === key)
+  if (notePaths.some((notePath) => keyFromNotePath(notePath) === key)) {
+    return true
+  }
+
+  for (const sidecarStorageKey of listSidecarKeys(rootPath)) {
+    try {
+      if (sidecars.read(sidecarStorageKey).key === key) {
+        return true
+      }
+    } catch {
+      if (sidecarStorageKey === key) {
+        return true
+      }
+    }
+  }
+
+  return false
 }
 
 function assertUniqueNoteKeys(rootPath: string, notePaths: readonly string[]): void {

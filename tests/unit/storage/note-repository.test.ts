@@ -289,6 +289,49 @@ test("repository enforces global key uniqueness across note, draft, and sidecars
   }
 })
 
+test("repository enforces global key uniqueness against noteId-keyed sidecars", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-note-id-key-collision-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    const sidecarPath = path.join(getStateNotesPath(rootPath), "note_orphan_123.json")
+    await mkdir(path.dirname(sidecarPath), { recursive: true })
+    await writeFile(sidecarPath, JSON.stringify({
+      type: "normal",
+      noteId: "note_orphan_123",
+      key: "shared-key",
+      title: "Shared key",
+      description: "Existing sidecar",
+      relativePath: "note/shared-key.md",
+      createdAt: "2026-05-21T10:15:00.000Z",
+      updatedAt: "2026-05-21T10:15:00.000Z",
+      archivedAt: null,
+      namingVersion: 1,
+    }), "utf8")
+
+    assert.equal(repository.keyExists("shared-key"), true)
+    assert.throws(
+      () =>
+        repository.create({
+          frontmatter: {
+            ...FIXED_FRONTMATTER,
+            id: "shared-key",
+            title: "Normal title",
+          },
+          body: "Normal body.\n",
+        }),
+      (error) => {
+        assert.ok(error instanceof UsageError)
+        assert.match(error.message, /Could not create note 'note[\\/]shared-key\.md'\./)
+        assert.match(error.hint ?? "", /same basename\/key already exists/i)
+        return true
+      },
+    )
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("repository archive writes an archived sidecar type", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-archive-type-"))
 

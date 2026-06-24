@@ -11,6 +11,9 @@ import { systemClock, type Clock } from "../platform/clock"
 import { createNoteId } from "../platform/ids"
 import { createNoteRepository } from "../storage/note-repository"
 import { ensureManagedRoot, getStateNotesPath } from "../storage/root-layout"
+import { createSidecarRepository } from "../storage/sidecar-repository"
+
+const STORAGE_SAFE_NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 
 export interface CreateNoteOptions extends ResolveBlueNoteRootOptions {
   type?: "draft" | "normal"
@@ -36,6 +39,7 @@ export interface CreateNoteSummary {
 function listExistingCreateKeys(rootPath: string, repository: ReturnType<typeof createNoteRepository>): Set<string> {
   const existingKeys = new Set(repository.listNotePaths().map((record) => path.basename(record.relativePath, ".md")))
   const stateNotesPath = getStateNotesPath(rootPath)
+  const sidecars = createSidecarRepository(rootPath)
 
   if (!existsSync(stateNotesPath)) {
     return existingKeys
@@ -46,7 +50,13 @@ function listExistingCreateKeys(rootPath: string, repository: ReturnType<typeof 
       continue
     }
 
-    existingKeys.add(path.basename(entry.name, ".json"))
+    const storageIdentifier = path.basename(entry.name, ".json")
+
+    try {
+      existingKeys.add(sidecars.read(storageIdentifier).key)
+    } catch {
+      existingKeys.add(storageIdentifier)
+    }
   }
   return existingKeys
 }
@@ -72,6 +82,11 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
   const repository = createNoteRepository(rootPath)
   const existingKeys = listExistingCreateKeys(rootPath, repository)
   const noteId = (options.noteIdGenerator ?? createNoteId)()
+  if (!STORAGE_SAFE_NOTE_ID_PATTERN.test(noteId)) {
+    throw new UsageError("Generated noteId must be a non-empty storage-safe string.", {
+      hint: "Use a note ID containing only letters, numbers, underscores, and hyphens.",
+    })
+  }
   const type = options.type ?? "draft"
   let title: string
   let key: string

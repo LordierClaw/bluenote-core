@@ -74,6 +74,32 @@ test("createNote assigns a noteId while preserving the human-readable key and ma
   }
 })
 
+test("createNote rejects generated noteIds that are not storage-safe basenames", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-create-note-bad-note-id-"))
+
+  try {
+    assert.throws(
+      () =>
+        createNote({
+          override: rootPath,
+          type: "draft",
+          title: "Bad Note ID",
+          body: "Draft body.\n",
+          randomSource: () => 46655,
+          noteIdGenerator: () => "note/nested",
+          clock: fixedClock("2026-06-06T12:00:00.000Z"),
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error)
+        assert.match(error.message, /noteId/i)
+        return true
+      },
+    )
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("createNote creates a titled draft under draft", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-create-note-draft-titled-"))
 
