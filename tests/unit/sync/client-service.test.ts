@@ -236,6 +236,54 @@ describe("sync client service", () => {
     })
   })
 
+  test("pulled draft note upserts create local drafts", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        bodies: { "draft-remote": "Remote draft body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 3,
+          hasMore: false,
+          changes: [{
+            sequence: 3,
+            entityType: "note",
+            entityId: "draft-remote",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Remote Draft",
+            relativePath: "draft/remote-draft.md",
+            bodyAvailable: true,
+            metadata: {
+              key: "remote-draft",
+              relativePath: "draft/remote-draft.md",
+              title: "Remote Draft",
+              createdAt: "2026-06-24T01:00:00.000Z",
+              updatedAt: "2026-06-24T01:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.equal(readFileSync(path.join(rootPath, "draft", "remote-draft.md"), "utf8"), "Remote draft body.\n")
+      assert.deepEqual(createSidecarRepository(rootPath).readByNoteId("draft-remote"), {
+        type: "draft",
+        noteId: "draft-remote",
+        key: "remote-draft",
+        title: "Remote Draft",
+        description: "Remote draft body.",
+        relativePath: "draft/remote-draft.md",
+        createdAt: "2026-06-24T01:00:00.000Z",
+        updatedAt: "2026-06-24T01:00:00.000Z",
+        archivedAt: null,
+        namingVersion: 1,
+      })
+    })
+  })
+
   test("sync cycle normalizes dirty folder records to protocol folder dirty types", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

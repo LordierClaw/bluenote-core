@@ -74,6 +74,10 @@ function collectExistingNoteFolders(rootPath: string): string[] {
   return folders.sort()
 }
 
+function isSyncSeedNotePath(relativePath: string): boolean {
+  return relativePath.startsWith("note/") || relativePath.startsWith("draft/")
+}
+
 function assertSupportedLinkMode(mode: string): asserts mode is "seed-empty-server-from-local" {
   if (mode !== "seed-empty-server-from-local") {
     throw new UsageError("Unsupported sync link mode.", {
@@ -150,7 +154,7 @@ export function linkCoreSync(options: SyncLinkOptions & ResolveBlueNoteRootOptio
   const identity = { role: "client" as const, workspaceId }
   const dirtyRepository = createDirtyRecordRepository(rootPath, identity)
   const folderRepository = createFolderRepository(rootPath, identity)
-  const notes = createNoteRepository(rootPath).list()
+  const notes = createNoteRepository(rootPath).list().filter((note) => isSyncSeedNotePath(note.sourcePath))
   const folders = collectExistingNoteFolders(rootPath)
 
   for (const folder of folders) {

@@ -36,6 +36,18 @@ describe("createBlueNoteCore sync namespace", () => {
     })
   })
 
+  test("init preserves an existing workspaceId", async () => {
+    await withTempRoot("bluenote-core-sync-init-workspace-", (rootPath) => {
+      const core = createBlueNoteCore({ rootPath })
+      core.init()
+      const firstWorkspaceId = readStateManifest(rootPath).workspaceId
+
+      core.init()
+
+      assert.equal(readStateManifest(rootPath).workspaceId, firstWorkspaceId)
+    })
+  })
+
   test("link seeds a client runtime mode and marks existing notes and folders dirty", async () => {
     await withTempRoot("bluenote-core-sync-link-", async (rootPath) => {
       const core = createBlueNoteCore({ rootPath })
@@ -91,6 +103,44 @@ describe("createBlueNoteCore sync namespace", () => {
         lastError: null,
       })
       assert.deepEqual(core.sync.now(), { status: "transport-not-configured", pushed: 0, pulled: 0 })
+    })
+  })
+
+  test("link skips archived notes during initial dirty seeding", async () => {
+    await withTempRoot("bluenote-core-sync-link-archived-", async (rootPath) => {
+      const core = createBlueNoteCore({ rootPath })
+      core.init()
+      await mkdir(path.join(rootPath, "note", "general"), { recursive: true })
+      const active = core.notes.create({
+        type: "normal",
+        title: "Active Note",
+        body: "Active local note.",
+        destinationFolder: "note/general",
+        enqueueAi: false,
+        noteIdGenerator: () => "note_active_seed",
+      })
+      const archived = core.notes.create({
+        type: "normal",
+        title: "Archived Note",
+        body: "Archived local note.",
+        destinationFolder: "note/general",
+        enqueueAi: false,
+        noteIdGenerator: () => "note_archived_seed",
+      })
+      core.notes.archive(archived.key, { clock: { now: () => new Date("2026-06-24T02:00:00.000Z") } })
+
+      const summary = core.sync.link({
+        mode: "seed-empty-server-from-local",
+        serverUrl: "https://sync.example.test",
+      })
+
+      assert.equal(summary.notesMarked, 1)
+      assert.equal(summary.dirtyRecordsMarked, 2)
+      const dirtyRecords = createDirtyRecordRepository(rootPath, { role: "client", workspaceId: summary.workspaceId }).listDirtyRecords()
+      assert.deepEqual(dirtyRecords.map((record) => [record.entityType, record.entityId, record.dirtyType]).sort(), [
+        ["folder", "note/general", "upsert"],
+        ["note", active.noteId, "upsert"],
+      ].sort())
     })
   })
 

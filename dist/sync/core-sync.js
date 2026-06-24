@@ -37,6 +37,9 @@ function collectExistingNoteFolders(rootPath) {
     visit(normalNotesPath);
     return folders.sort();
 }
+function isSyncSeedNotePath(relativePath) {
+    return relativePath.startsWith("note/") || relativePath.startsWith("draft/");
+}
 function assertSupportedLinkMode(mode) {
     if (mode !== "seed-empty-server-from-local") {
         throw new UsageError("Unsupported sync link mode.", {
@@ -105,7 +108,7 @@ export function linkCoreSync(options) {
     const identity = { role: "client", workspaceId };
     const dirtyRepository = createDirtyRecordRepository(rootPath, identity);
     const folderRepository = createFolderRepository(rootPath, identity);
-    const notes = createNoteRepository(rootPath).list();
+    const notes = createNoteRepository(rootPath).list().filter((note) => isSyncSeedNotePath(note.sourcePath));
     const folders = collectExistingNoteFolders(rootPath);
     for (const folder of folders) {
         folderRepository.upsertFolder({ relativePath: folder, createdAt: markedAt, updatedAt: markedAt });

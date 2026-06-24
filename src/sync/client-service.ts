@@ -62,14 +62,22 @@ function assertMetadataKeyMatchesRelativePath(key: string, relativePath: string)
 
 function normalizeNoteRelativePath(rootPath: string, relativePath: string): string {
   const portableRelativePath = relativePath.replace(/\\/g, "/").replace(/^\.\//, "")
-  if (!portableRelativePath.startsWith("note/") || !portableRelativePath.endsWith(".md")) {
+  const isSyncNotePath = portableRelativePath.startsWith("note/") || portableRelativePath.startsWith("draft/")
+  if (!isSyncNotePath || !portableRelativePath.endsWith(".md")) {
     throw new Error(`Invalid pulled note relativePath '${relativePath}'.`)
   }
   const normalizedRelativePath = toRootRelativePath(rootPath, assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath)))
-  if (!normalizedRelativePath.startsWith("note/") || !normalizedRelativePath.endsWith(".md")) {
+  const isNormalizedSyncNotePath = normalizedRelativePath.startsWith("note/") || normalizedRelativePath.startsWith("draft/")
+  if (!isNormalizedSyncNotePath || !normalizedRelativePath.endsWith(".md")) {
     throw new Error(`Invalid pulled note relativePath '${relativePath}'.`)
   }
   return normalizedRelativePath
+}
+
+function destinationForPulledNote(relativePath: string): { type: "draft" } | { type: "normal"; folderRelativePath: string } {
+  return relativePath.startsWith("draft/")
+    ? { type: "draft" }
+    : { type: "normal", folderRelativePath: path.posix.dirname(relativePath) }
 }
 
 function assertExistingPathIsNotSymlink(filePath: string, relativeLabel: string): void {
@@ -223,7 +231,7 @@ function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: s
         createdAt,
         updatedAt,
       },
-      destination: { type: "normal", folderRelativePath: path.posix.dirname(relativePath) },
+      destination: destinationForPulledNote(relativePath),
     })
     if (ai !== undefined) {
       sidecars.write({ ...sidecars.readByNoteId(change.entityId), ai })
