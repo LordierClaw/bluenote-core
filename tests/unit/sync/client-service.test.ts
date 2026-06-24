@@ -471,6 +471,58 @@ describe("sync client service", () => {
     })
   })
 
+  test("pulled same-path AI validation failure rolls back edited note and sidecar", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Same Path Rollback",
+        body: "Original same-path body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-same-path-rollback",
+      })
+      const sidecars = createSidecarRepository(rootPath)
+      const originalSidecar = sidecars.readByNoteId(note.noteId)
+      const originalMarkdown = readFileSync(note.notePath, "utf8")
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Mutated body must roll back.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 15,
+          hasMore: false,
+          changes: [{
+            sequence: 15,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Mutated Title",
+            relativePath: note.relativePath,
+            bodyAvailable: true,
+            metadata: {
+              key: note.key,
+              relativePath: note.relativePath,
+              title: "Mutated Title",
+              updatedAt: "2026-06-24T01:00:00.000Z",
+              ai: { description: { lastProcessedAt: 123 } },
+            },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /Invalid sidecar|lastProcessedAt/i)
+      assert.equal(readFileSync(note.notePath, "utf8"), originalMarkdown)
+      assert.deepEqual(sidecars.readByNoteId(note.noteId), originalSidecar)
+      assert.equal(core.notes.get(note.key).body, "Original same-path body.\n")
+      assert.equal(core.notes.get(note.key).title, "Same Path Rollback")
+    })
+  })
+
   test("pulled relocation rejects symlinked destination parents before writing", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
