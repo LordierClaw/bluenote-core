@@ -7,6 +7,8 @@ import { access, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises"
 import {
   APP_STATE_DIRECTORY,
   APP_STATE_NOTES_DIRECTORY,
+  APP_STATE_SYNC_DIRECTORY,
+  APP_STATE_SYNC_LOGS_DIRECTORY,
   LEGACY_STATE_DIRECTORY,
 } from "../../../src/config/root"
 import { UsageError } from "../../../src/core/errors"
@@ -36,7 +38,15 @@ test("ensureManagedRoot creates the full managed root layout", async () => {
       assert.equal(stats.isDirectory(), true, `${relativePath} should be a directory`)
     }
 
-    for (const relativePath of ["note", "draft", path.join(".data", "archive"), path.join(".data", "notes"), path.join(".data", "ai")]) {
+    for (const relativePath of [
+      "note",
+      "draft",
+      path.join(".data", "archive"),
+      path.join(".data", "notes"),
+      path.join(".data", "ai"),
+      path.join(".data", "sync"),
+      path.join(".data", "sync", "logs"),
+    ]) {
       const fullPath = path.join(tempRoot, relativePath)
       const stats = await stat(fullPath)
       assert.equal(stats.isDirectory(), true, `${relativePath} should be a directory`)
@@ -66,6 +76,8 @@ test("root layout helpers expose note and sidecar paths for repository storage",
     assert.equal(getStateNotesPath(resolvedRoot), path.join(resolvedRoot, ".data", "notes"))
     assert.equal(APP_STATE_DIRECTORY, ".data")
     assert.equal(APP_STATE_NOTES_DIRECTORY, path.join(".data", "notes"))
+    assert.equal(APP_STATE_SYNC_DIRECTORY, path.join(".data", "sync"))
+    assert.equal(APP_STATE_SYNC_LOGS_DIRECTORY, path.join(".data", "sync", "logs"))
     assert.equal(LEGACY_STATE_DIRECTORY, ".state")
     assert.equal(getNormalNotePath(resolvedRoot, "note-123"), path.join(resolvedRoot, "note", "note-123.md"))
     assert.equal(getArchiveNotePath(resolvedRoot, "note-123"), path.join(resolvedRoot, ".data", "archive", "note-123.md"))

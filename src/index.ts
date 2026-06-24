@@ -66,6 +66,7 @@ export * from "./storage/root-layout"
 export * from "./storage/sidecar-repository"
 export * from "./storage/sidecar-schema"
 export * from "./storage/state-manifest"
+export * from "./sync/sync-db"
 export * from "./search/contains-match"
 
 export type {
