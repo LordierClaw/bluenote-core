@@ -207,11 +207,14 @@ function applyPulledNoteDelete(rootPath, change) {
         return;
     }
     const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath));
+    const sidecarPath = createSidecarRepository(rootPath).getSidecarPathByNoteId(change.entityId);
+    assertPathAndParentsAreNotSymlinks(rootPath, notePath);
+    assertPathAndParentsAreNotSymlinks(rootPath, sidecarPath);
     if (fs.existsSync(notePath)) {
         createNoteRepository(rootPath).delete(notePath);
     }
     else {
-        fs.rmSync(createSidecarRepository(rootPath).getSidecarPathByNoteId(change.entityId), { force: true });
+        fs.rmSync(sidecarPath, { force: true });
     }
 }
 function applyPulledChange(rootPath, change, transport) {

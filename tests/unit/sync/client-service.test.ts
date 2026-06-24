@@ -2,11 +2,12 @@ import { describe, test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
-import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
 import { createBlueNoteCore, createDirtyRecordRepository, type SyncTransport } from "../../../src"
 import { createSyncClientService } from "../../../src/sync/client-service"
+import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import { setSyncRuntimeMode } from "../../../src/sync/runtime-mode"
 import type { PullChangesRequest, PullChangesResponse, PushRequest, PushResponse } from "../../../src/sync/protocol"
 
@@ -513,6 +514,51 @@ describe("sync client service", () => {
       assert.equal(existsSync(path.join(outsidePath, "escaped.md")), false)
       assert.equal(readFileSync(note.notePath, "utf8").includes("Safe local body."), true)
       assert.equal(core.notes.get(note.key).body, "Safe local body.\n")
+    })
+  })
+
+  test("pulled delete rejects symlinked note parents before deleting", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note"), { recursive: true })
+      const outsidePath = path.join(rootPath, "outside")
+      mkdirSync(outsidePath, { recursive: true })
+      writeFileSync(path.join(outsidePath, "victim.md"), "Outside content must remain.\n", "utf8")
+      symlinkSync(outsidePath, path.join(rootPath, "note", "link"), "dir")
+      const sidecars = createSidecarRepository(rootPath)
+      sidecars.write({
+        noteId: "note-delete-symlink",
+        key: "victim",
+        title: "Victim",
+        description: "Outside content must remain.",
+        relativePath: "note/link/victim.md",
+        createdAt: "2026-06-24T00:00:00.000Z",
+        updatedAt: "2026-06-24T00:00:00.000Z",
+        archivedAt: null,
+        namingVersion: 1,
+        type: "normal",
+      })
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 14,
+          hasMore: false,
+          changes: [{
+            sequence: 14,
+            entityType: "note",
+            entityId: "note-delete-symlink",
+            changeType: "delete",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            metadata: { relativePath: "note/link/victim.md" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /symlink/i)
+      assert.equal(readFileSync(path.join(outsidePath, "victim.md"), "utf8"), "Outside content must remain.\n")
+      assert.equal(existsSync(sidecars.getSidecarPathByNoteId("note-delete-symlink")), true)
     })
   })
 
