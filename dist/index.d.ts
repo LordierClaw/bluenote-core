@@ -70,6 +70,7 @@ export * from "./sync/core-sync.js";
 export * from "./sync/types.js";
 export * from "./sync/protocol.js";
 export * from "./sync/server-service.js";
+export * from "./sync/http-transport.js";
 export * from "./sync/dirty-repository.js";
 export * from "./sync/folder-repository.js";
 export { ensureSyncDatabase, getSyncDatabasePath, SYNC_SCHEMA_VERSION, serializeSyncMetadata, parseSyncMetadata, } from "./sync/sync-db.js";
