@@ -132,6 +132,60 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
   })
 })
 
+test("server allocates in-batch revisions transactionally for repeated entity changes", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: {
+        "note-dup": "Second version should win on disk.\n",
+      },
+      records: [
+        {
+          entityType: "note",
+          entityId: "note-dup",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: {
+            key: "dup-note",
+            title: "Dup Note 1",
+            relativePath: "note/dup-note.md",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+          bodyUpload: { contentHash: "sha256:dup-1", byteLength: 35 },
+        },
+        {
+          entityType: "note",
+          entityId: "note-dup",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+          metadata: {
+            key: "dup-note",
+            title: "Dup Note 2",
+            relativePath: "note/dup-note.md",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:01:00.000Z",
+          },
+          bodyUpload: { contentHash: "sha256:dup-2", byteLength: 35 },
+        },
+      ],
+    })
+
+    assert.deepEqual(response.accepted, [
+      { entityType: "note", entityId: "note-dup", serverRevision: 1 },
+      { entityType: "note", entityId: "note-dup", serverRevision: 2 },
+    ])
+    assert.deepEqual(
+      server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 }).changes.map((change) => change.serverRevision),
+      [1, 2],
+    )
+  })
+})
+
 test("tombstone push deletes the note, records tombstone state, and appears in change list", async () => {
   await withRoot((rootPath) => {
     const server = createSyncServerService({ rootPath, workspaceId })

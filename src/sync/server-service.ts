@@ -13,6 +13,8 @@ import type {
   DownloadNoteBodyResponse,
   PullChangesRequest,
   PullChangesResponse,
+  PushAcceptedRecord,
+  PushRejectedRecord,
   PushRequest,
   PushResponse,
   SyncChangeEntityType,
@@ -348,14 +350,13 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
   return {
     acceptPush(request) {
       assertWorkspace(options.workspaceId, request.workspaceId)
-      const accepted = []
-      const rejected = []
+      const accepted: PushAcceptedRecord[] = []
+      const rejected: PushRejectedRecord[] = []
       const aiNoteIds: string[] = []
       const appliedChanges: AppliedChange[] = []
 
       for (const record of request.records) {
         try {
-          const serverRevision = withSyncDatabase(rootPath, dbIdentity, (handle) => latestServerRevision(handle, record.entityType, record.entityId)) + 1
           const changedAt = new Date().toISOString()
 
           if (record.entityType === "note" && record.dirtyType === "upsert") {
@@ -375,7 +376,7 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
               entityType: "note",
               entityId: record.entityId,
               changeType: "upsert",
-              serverRevision,
+              serverRevision: 0,
               changedAt,
               sourceReplicaId: request.replicaId,
               title: metadata.title,
@@ -390,7 +391,7 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
               entityType: "note",
               entityId: record.entityId,
               changeType: "delete",
-              serverRevision,
+              serverRevision: 0,
               changedAt,
               sourceReplicaId: request.replicaId,
               title: deletion.title,
@@ -404,7 +405,7 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
             })
           }
 
-          accepted.push({ entityType: record.entityType, entityId: record.entityId, serverRevision })
+          accepted.push({ entityType: record.entityType, entityId: record.entityId, serverRevision: 0 })
         } catch (error) {
           rejected.push({
             entityType: record.entityType,
@@ -418,7 +419,14 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
       const serverSequence = withSyncDatabase(rootPath, dbIdentity, (handle) => {
         handle.db.run("BEGIN IMMEDIATE TRANSACTION")
         try {
-          for (const change of appliedChanges) {
+          const latestRevisions = new Map<string, number>()
+          for (const [index, change] of appliedChanges.entries()) {
+            const revisionKey = `${change.entityType}\u0000${change.entityId}`
+            const previousRevision = latestRevisions.get(revisionKey) ?? latestServerRevision(handle, change.entityType, change.entityId)
+            const serverRevision = previousRevision + 1
+            latestRevisions.set(revisionKey, serverRevision)
+            change.serverRevision = serverRevision
+            accepted[index].serverRevision = serverRevision
             insertServerChange(handle, options.workspaceId, change)
           }
           const latestSequence = latestServerSequence(handle)

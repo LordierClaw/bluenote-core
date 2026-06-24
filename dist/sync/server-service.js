@@ -253,7 +253,6 @@ export function createSyncServerService(options) {
             const appliedChanges = [];
             for (const record of request.records) {
                 try {
-                    const serverRevision = withSyncDatabase(rootPath, dbIdentity, (handle) => latestServerRevision(handle, record.entityType, record.entityId)) + 1;
                     const changedAt = new Date().toISOString();
                     if (record.entityType === "note" && record.dirtyType === "upsert") {
                         const body = request.noteBodies?.[record.entityId];
@@ -272,7 +271,7 @@ export function createSyncServerService(options) {
                             entityType: "note",
                             entityId: record.entityId,
                             changeType: "upsert",
-                            serverRevision,
+                            serverRevision: 0,
                             changedAt,
                             sourceReplicaId: request.replicaId,
                             title: metadata.title,
@@ -288,7 +287,7 @@ export function createSyncServerService(options) {
                             entityType: "note",
                             entityId: record.entityId,
                             changeType: "delete",
-                            serverRevision,
+                            serverRevision: 0,
                             changedAt,
                             sourceReplicaId: request.replicaId,
                             title: deletion.title,
@@ -302,7 +301,7 @@ export function createSyncServerService(options) {
                             hint: "Task 11 implements note upsert/delete server handling only.",
                         });
                     }
-                    accepted.push({ entityType: record.entityType, entityId: record.entityId, serverRevision });
+                    accepted.push({ entityType: record.entityType, entityId: record.entityId, serverRevision: 0 });
                 }
                 catch (error) {
                     rejected.push({
@@ -316,7 +315,14 @@ export function createSyncServerService(options) {
             const serverSequence = withSyncDatabase(rootPath, dbIdentity, (handle) => {
                 handle.db.run("BEGIN IMMEDIATE TRANSACTION");
                 try {
-                    for (const change of appliedChanges) {
+                    const latestRevisions = new Map();
+                    for (const [index, change] of appliedChanges.entries()) {
+                        const revisionKey = `${change.entityType}\u0000${change.entityId}`;
+                        const previousRevision = latestRevisions.get(revisionKey) ?? latestServerRevision(handle, change.entityType, change.entityId);
+                        const serverRevision = previousRevision + 1;
+                        latestRevisions.set(revisionKey, serverRevision);
+                        change.serverRevision = serverRevision;
+                        accepted[index].serverRevision = serverRevision;
                         insertServerChange(handle, options.workspaceId, change);
                     }
                     const latestSequence = latestServerSequence(handle);
