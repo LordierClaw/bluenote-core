@@ -98,6 +98,11 @@ function numberMetadata(metadata: Record<string, unknown>, key: string): number 
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
+function objectMetadata(metadata: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const value = metadata[key]
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
 function basenameKeyFromRelativePath(relativePath: string): string {
   return path.posix.basename(relativePath, ".md")
 }
@@ -261,6 +266,7 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Mut
   const repository = createNoteRepository(rootPath)
   const sidecars = createSidecarRepository(rootPath)
   const sidecar = readSidecarIfExists(rootPath, record.entityId)
+  const ai = objectMetadata(record.metadata, "ai") as NoteSidecar["ai"] | undefined
   const targetPath = assertPathInsideRoot(rootPath, path.join(rootPath, metadata.relativePath))
   const sidecarPath = sidecars.getSidecarPathByNoteId(record.entityId)
   const existingPath = sidecar === null ? null : assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath))
@@ -286,6 +292,9 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Mut
         },
         destination: { type: "normal", folderRelativePath: path.posix.dirname(metadata.relativePath) },
       })
+      if (ai !== undefined) {
+        sidecars.write({ ...sidecars.readByNoteId(record.entityId), ai })
+      }
     } else {
       if (sidecar.relativePath !== metadata.relativePath || sidecar.key !== metadata.key) {
         const nextPath = targetPath
@@ -306,6 +315,7 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Mut
           description: createNoteDescription(body),
           relativePath: metadata.relativePath,
           updatedAt: metadata.updatedAt,
+          ...(ai === undefined ? {} : { ai }),
         })
       } else {
         repository.syncEditedNote(existingPath ?? targetPath, {

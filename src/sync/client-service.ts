@@ -3,6 +3,7 @@ import fs from "node:fs"
 
 import { createNoteDescription } from "../domain/note-description"
 import { UsageError } from "../core/errors"
+import { rebuildIndexes } from "../core/rebuild-indexes"
 import { assertPathInsideRoot, toRootRelativePath } from "../platform/path-safety"
 import { createNoteRepository } from "../storage/note-repository"
 import { serializePlainNote } from "../storage/plain-note"
@@ -39,6 +40,11 @@ interface FileSnapshot {
 function metadataString(metadata: Record<string, unknown> | null, key: string): string | null {
   const value = metadata?.[key]
   return typeof value === "string" ? value : null
+}
+
+function metadataObject(metadata: Record<string, unknown> | null, key: string): Record<string, unknown> | undefined {
+  const value = metadata?.[key]
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
 function basenameKey(relativePath: string): string {
@@ -199,6 +205,7 @@ function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: s
   const title = metadataString(change.metadata, "title") ?? change.title ?? key
   const updatedAt = metadataString(change.metadata, "updatedAt") ?? change.changedAt
   const createdAt = metadataString(change.metadata, "createdAt") ?? updatedAt
+  const ai = metadataObject(change.metadata, "ai") as NoteSidecar["ai"] | undefined
   const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath))
 
   if (existingSidecar === null) {
@@ -217,6 +224,9 @@ function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: s
       },
       destination: { type: "normal", folderRelativePath: path.posix.dirname(relativePath) },
     })
+    if (ai !== undefined) {
+      sidecars.write({ ...sidecars.readByNoteId(change.entityId), ai })
+    }
     return
   }
 
@@ -242,6 +252,7 @@ function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: s
       description: createNoteDescription(body),
       relativePath,
       updatedAt,
+      ...(ai === undefined ? {} : { ai }),
     })
   } catch (error) {
     restoreFileSnapshots(rootPath, snapshots)
@@ -306,6 +317,7 @@ function toPushRecord(record: DirtyRecord): SyncPushRecord {
 function buildPushRequest(rootPath: string, workspaceId: string, replicaId: string, baseSequence: number, records: DirtyRecord[]): PushRequestWithBodies {
   const noteBodies: Record<string, string> = {}
   const pushRecords = records.map((record) => {
+    let pushRecord = toPushRecord(record)
     if (record.entityType === "note" && record.dirtyType === "upsert") {
       const sidecar = readSidecarIfExists(rootPath, record.entityId)
       const relativePath = sidecar?.relativePath ?? metadataString(record.metadata, "relativePath")
@@ -313,8 +325,22 @@ function buildPushRequest(rootPath: string, workspaceId: string, replicaId: stri
         const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath))
         noteBodies[record.entityId] = createNoteRepository(rootPath).read(notePath).body
       }
+      if (sidecar !== null) {
+        pushRecord = {
+          ...pushRecord,
+          metadata: {
+            ...pushRecord.metadata,
+            key: sidecar.key,
+            title: sidecar.title,
+            relativePath: sidecar.relativePath,
+            createdAt: sidecar.createdAt,
+            updatedAt: sidecar.updatedAt,
+            ...(sidecar.ai === undefined ? {} : { ai: sidecar.ai }),
+          },
+        }
+      }
     }
-    return toPushRecord(record)
+    return pushRecord
   })
 
   return {
@@ -359,6 +385,10 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
         if (!response.hasMore) {
           break
         }
+      }
+
+      if (pulled > 0) {
+        rebuildIndexes({ override: rootPath })
       }
 
       const dirtyRecords = dirty.listDirtyRecords()
