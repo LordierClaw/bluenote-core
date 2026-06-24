@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
 import { readFileSync, writeFileSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
 import initSqlJs from "sql.js"
@@ -133,6 +133,21 @@ test("sync database lock does not evict an old lock owned by a live process", as
       pid: process.pid,
       acquiredAt: "2000-01-01T00:00:00.000Z",
     }, null, 2) + "\n", "utf8")
+
+    assert.throws(
+      () => repository.listDirtyRecords(),
+      /busy/i,
+    )
+  })
+})
+
+test("sync database lock does not evict an old metadata-less lock", async () => {
+  await withRoot("bluenote-sync-db-empty-lock-", async (rootPath) => {
+    const repository = createDirtyRecordRepository(rootPath, dbIdentity)
+    const lockPath = path.join(rootPath, ".data", "sync", "sync.sqlite.lock")
+    await mkdir(lockPath, { recursive: true })
+    const oldTimestamp = new Date("2000-01-01T00:00:00.000Z")
+    await utimes(lockPath, oldTimestamp, oldTimestamp)
 
     assert.throws(
       () => repository.listDirtyRecords(),

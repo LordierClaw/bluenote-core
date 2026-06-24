@@ -1,5 +1,5 @@
 import path from "node:path"
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
@@ -17,7 +17,6 @@ import { ensureManagedRoot } from "../storage/root-layout"
 const SQL_WASM_FILENAME = "sql-wasm.wasm"
 const executableAdjacentSqlWasmPath = path.join(path.dirname(process.execPath), SQL_WASM_FILENAME)
 const projectSqlWasmPath = path.resolve("node_modules", "sql.js", "dist", SQL_WASM_FILENAME)
-const SYNC_DB_LOCK_STALE_AFTER_MS = 10 * 60 * 1000
 
 let resolvedSqlWasmPath: string | null = null
 try {
@@ -127,32 +126,6 @@ function getSyncDatabaseLockMetadataPath(lockPath: string): string {
   return path.join(lockPath, "lock.json")
 }
 
-function readSyncDatabaseLockMetadata(lockPath: string): SyncDatabaseLockMetadata | null {
-  try {
-    const parsed = JSON.parse(readFileSync(getSyncDatabaseLockMetadataPath(lockPath), "utf8")) as Partial<SyncDatabaseLockMetadata>
-    if (typeof parsed.pid === "number" && typeof parsed.acquiredAt === "string") {
-      return { pid: parsed.pid, acquiredAt: parsed.acquiredAt }
-    }
-  } catch {
-    // Missing or malformed metadata is handled by the directory mtime fallback.
-  }
-
-  return null
-}
-
-function isStaleSyncDatabaseLock(lockPath: string, now = Date.now()): boolean {
-  const metadata = readSyncDatabaseLockMetadata(lockPath)
-  if (metadata) {
-    return false
-  }
-
-  try {
-    return now - statSync(lockPath).mtimeMs > SYNC_DB_LOCK_STALE_AFTER_MS
-  } catch {
-    return false
-  }
-}
-
 function writeSyncDatabaseLockMetadata(lockPath: string): void {
   writeFileSync(getSyncDatabaseLockMetadataPath(lockPath), `${JSON.stringify({
     pid: process.pid,
@@ -167,23 +140,17 @@ function acquireSyncDatabaseLock(syncDatabasePath: string): () => void {
   try {
     mkdirSync(path.dirname(lockPath), { recursive: true })
     mkdirSync(lockPath)
-    writeSyncDatabaseLockMetadata(lockPath)
+    try {
+      writeSyncDatabaseLockMetadata(lockPath)
+    } catch (metadataError) {
+      rmSync(lockPath, { recursive: true, force: true })
+      throw metadataError
+    }
   } catch (error) {
     const code = error instanceof Error && "code" in error ? (error as NodeJS.ErrnoException).code : undefined
-    if (code === "EEXIST" && isStaleSyncDatabaseLock(lockPath)) {
-      try {
-        rmSync(lockPath, { recursive: true, force: true })
-        mkdirSync(lockPath)
-        writeSyncDatabaseLockMetadata(lockPath)
-      } catch (recoveryError) {
-        throw new UsageError(`Could not recover stale sync database lock '${relativePath}'.`, {
-          hint: "Retry after any other BlueNote sync operation finishes, or remove the stale .data/sync/sync.sqlite.lock directory if no BlueNote process is running.",
-          cause: recoveryError,
-        })
-      }
-    } else if (code === "EEXIST") {
+    if (code === "EEXIST") {
       throw new UsageError(`Sync database '${relativePath}' is busy.`, {
-        hint: "Retry after any other BlueNote sync operation finishes.",
+        hint: "Retry after any other BlueNote sync operation finishes, or remove .data/sync/sync.sqlite.lock manually if no BlueNote process is running.",
         cause: error,
       })
     } else {
