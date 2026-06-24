@@ -30,6 +30,12 @@ export interface SyncClientService {
 
 type PushRequestWithBodies = PushRequest & { noteBodies?: Record<string, string> }
 
+interface FileSnapshot {
+  filePath: string
+  existed: boolean
+  content: Buffer | null
+}
+
 function metadataString(metadata: Record<string, unknown> | null, key: string): string | null {
   const value = metadata?.[key]
   return typeof value === "string" ? value : null
@@ -52,7 +58,29 @@ function normalizeNoteRelativePath(rootPath: string, relativePath: string): stri
   if (!portableRelativePath.startsWith("note/") || !portableRelativePath.endsWith(".md")) {
     throw new Error(`Invalid pulled note relativePath '${relativePath}'.`)
   }
-  return toRootRelativePath(rootPath, assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath)))
+  const normalizedRelativePath = toRootRelativePath(rootPath, assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath)))
+  if (!normalizedRelativePath.startsWith("note/") || !normalizedRelativePath.endsWith(".md")) {
+    throw new Error(`Invalid pulled note relativePath '${relativePath}'.`)
+  }
+  return normalizedRelativePath
+}
+
+function snapshotFile(filePath: string): FileSnapshot {
+  if (!fs.existsSync(filePath)) {
+    return { filePath, existed: false, content: null }
+  }
+  return { filePath, existed: true, content: fs.readFileSync(filePath) }
+}
+
+function restoreFileSnapshots(snapshots: FileSnapshot[]): void {
+  for (const snapshot of [...snapshots].reverse()) {
+    if (snapshot.existed) {
+      fs.mkdirSync(path.dirname(snapshot.filePath), { recursive: true })
+      fs.writeFileSync(snapshot.filePath, snapshot.content ?? Buffer.alloc(0))
+    } else {
+      fs.rmSync(snapshot.filePath, { force: true })
+    }
+  }
 }
 
 function readLastPulledSequence(rootPath: string, identity: EnsureSyncDatabaseOptions, replicaId: string): number {
@@ -164,19 +192,25 @@ function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: s
     return
   }
 
-  fs.mkdirSync(path.dirname(notePath), { recursive: true })
-  fs.writeFileSync(notePath, serializePlainNote({ sourcePath: relativePath, body }), "utf8")
-  if (existingPath !== notePath && fs.existsSync(existingPath)) {
-    fs.rmSync(existingPath, { force: true })
+  const snapshots = [snapshotFile(notePath), snapshotFile(existingPath), snapshotFile(sidecars.getSidecarPathByNoteId(change.entityId))]
+  try {
+    fs.mkdirSync(path.dirname(notePath), { recursive: true })
+    fs.writeFileSync(notePath, serializePlainNote({ sourcePath: relativePath, body }), "utf8")
+    if (existingPath !== notePath && fs.existsSync(existingPath)) {
+      fs.rmSync(existingPath, { force: true })
+    }
+    sidecars.write({
+      ...existingSidecar,
+      key,
+      title,
+      description: createNoteDescription(body),
+      relativePath,
+      updatedAt,
+    })
+  } catch (error) {
+    restoreFileSnapshots(snapshots)
+    throw error
   }
-  sidecars.write({
-    ...existingSidecar,
-    key,
-    title,
-    description: createNoteDescription(body),
-    relativePath,
-    updatedAt,
-  })
 }
 
 function applyPulledNoteDelete(rootPath: string, change: SyncChangeView): void {

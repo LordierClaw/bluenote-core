@@ -385,6 +385,91 @@ describe("sync client service", () => {
     })
   })
 
+  test("pulled note relative paths are validated after normalization before writing", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Victim",
+        body: "Victim body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-victim",
+      })
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Escaped body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 11,
+          hasMore: false,
+          changes: [{
+            sequence: 11,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Escape",
+            relativePath: "note/../escape.md",
+            bodyAvailable: true,
+            metadata: { key: "escape", relativePath: "note/../escape.md", title: "Escape", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /relativePath|note\//i)
+      assert.equal(existsSync(path.join(rootPath, "escape.md")), false)
+      assert.equal(readFileSync(note.notePath, "utf8").includes("Victim body."), true)
+      assert.equal(core.notes.get(note.key).body, "Victim body.\n")
+    })
+  })
+
+  test("pulled relocation rolls back files when sidecar validation fails", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Rollback Source",
+        body: "Original body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-rollback-source",
+      })
+      const destination = "note/projects/rollback-target.md"
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Relocated body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 12,
+          hasMore: false,
+          changes: [{
+            sequence: 12,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Rollback Target",
+            relativePath: destination,
+            bodyAvailable: true,
+            metadata: { key: "rollback-target", relativePath: destination, title: "Rollback Target", updatedAt: "not-a-date" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /Invalid sidecar|updatedAt/i)
+      assert.equal(readFileSync(note.notePath, "utf8").includes("Original body."), true)
+      assert.equal(existsSync(path.join(rootPath, destination)), false)
+      assert.equal(core.notes.get(note.key).body, "Original body.\n")
+    })
+  })
+
   test("createBlueNoteCore sync.now uses a configured abstract transport", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
