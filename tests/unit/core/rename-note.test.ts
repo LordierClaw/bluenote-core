@@ -11,12 +11,14 @@ async function writePlainNoteWithSidecar(
   rootPath: string,
   {
     key,
+    noteId,
     title,
     description,
     relativePath,
     body,
   }: {
     key: string
+    noteId?: string
     title: string
     description: string
     relativePath: string
@@ -24,7 +26,7 @@ async function writePlainNoteWithSidecar(
   },
 ) {
   const notePath = path.join(rootPath, relativePath)
-  const sidecarPath = path.join(rootPath, ".data", "notes", `${key}.json`)
+  const sidecarPath = path.join(rootPath, ".data", "notes", `${noteId ?? key}.json`)
 
   await mkdir(path.dirname(notePath), { recursive: true })
   await mkdir(path.dirname(sidecarPath), { recursive: true })
@@ -33,6 +35,7 @@ async function writePlainNoteWithSidecar(
     sidecarPath,
     JSON.stringify(
       {
+        ...(noteId === undefined ? {} : { noteId }),
         key,
         title,
         description,
@@ -50,6 +53,56 @@ async function writePlainNoteWithSidecar(
     "utf8",
   )
 }
+
+test("renameNote preserves noteId-keyed sidecars while updating mutable metadata", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-rename-note-note-id-"))
+  const noteId = "note_rename_123"
+  const previousRelativePath = "note/work/original-note.md"
+
+  try {
+    await writePlainNoteWithSidecar(rootPath, {
+      noteId,
+      key: "original-note",
+      title: "Original Title",
+      description: "Original description.",
+      relativePath: previousRelativePath,
+      body: "# Original Title\n\nBody before rename.\n",
+    })
+
+    const summary = renameNote({
+      override: rootPath,
+      selector: "original-note",
+      title: "Renamed Title",
+      body: "# Renamed Title\n\nBody after rename.\n",
+      updatedAt: "2026-05-21T12:45:00.000Z",
+      randomSource: () => 10,
+    })
+
+    assert.equal(summary.previousKey, "original-note")
+    assert.equal(summary.key, "renamed-title-00000a")
+    assert.equal(summary.previousRelativePath, previousRelativePath)
+    assert.equal(summary.relativePath, "note/work/renamed-title-00000a.md")
+    await assert.rejects(() => access(path.join(rootPath, ".data", "notes", "original-note.json")))
+    await assert.rejects(() => access(path.join(rootPath, ".data", "notes", "renamed-title-00000a.json")))
+
+    const sidecarPath = path.join(rootPath, ".data", "notes", `${noteId}.json`)
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8")) as {
+      noteId: string
+      key: string
+      title: string
+      relativePath: string
+      archivedAt: string | null
+    }
+
+    assert.equal(sidecar.noteId, noteId)
+    assert.equal(sidecar.key, "renamed-title-00000a")
+    assert.equal(sidecar.title, "Renamed Title")
+    assert.equal(sidecar.relativePath, "note/work/renamed-title-00000a.md")
+    assert.equal(sidecar.archivedAt, null)
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
 
 test("renameNote renames the key, file, and sidecar and reports the previous and new key", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-rename-note-"))
