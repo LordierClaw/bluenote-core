@@ -57,6 +57,19 @@ function listSidecarKeys(rootPath, testHooks) {
         });
     }
 }
+function findSidecarForRebuild(rootPath, sidecars, expectedKey, expectedRelativePath) {
+    const legacySidecarPath = sidecars.getSidecarPath(expectedKey);
+    if (existsSync(legacySidecarPath)) {
+        return sidecars.read(expectedKey);
+    }
+    for (const sidecarKey of listSidecarKeys(rootPath)) {
+        const sidecar = sidecars.read(sidecarKey);
+        if (sidecar.key === expectedKey && path.normalize(sidecar.relativePath) === path.normalize(expectedRelativePath)) {
+            return sidecar;
+        }
+    }
+    return undefined;
+}
 function readLegacyFrontmatterNote(rawNote, relativePath) {
     try {
         return parseNoteFile(rawNote, relativePath);
@@ -101,16 +114,18 @@ export function rebuildIndexes(options = {}) {
             validationErrors.push(...collectErrorMessages(error));
             continue;
         }
-        const sidecarPath = sidecars.getSidecarPath(expectedKey);
+        let sidecar = findSidecarForRebuild(rootPath, sidecars, expectedKey, record.relativePath);
         try {
-            if (!existsSync(sidecarPath)) {
+            if (sidecar === undefined) {
                 const legacyNote = readLegacyFrontmatterNote(rawNote, record.relativePath);
                 if (legacyNote !== null) {
                     notes.push(legacyNote);
                     continue;
                 }
             }
-            const sidecar = sidecars.read(expectedKey);
+            if (sidecar === undefined) {
+                sidecar = sidecars.read(expectedKey);
+            }
             const plainNote = parsePlainNote(rawNote, record.relativePath);
             let isValid = true;
             if (sidecar.key !== expectedKey) {
@@ -146,6 +161,9 @@ export function rebuildIndexes(options = {}) {
             }
             try {
                 const sidecar = sidecars.read(sidecarKey);
+                if (noteRelativePathByKey.get(sidecar.key) === sidecar.relativePath) {
+                    continue;
+                }
                 if (path.isAbsolute(sidecar.relativePath)) {
                     throw new UsageError(`Sidecar '${path.join(STATE_NOTES_DIRECTORY, `${sidecarKey}.json`)}' declares absolute relativePath '${sidecar.relativePath}'.`);
                 }

@@ -1,4 +1,4 @@
-export declare const MANAGED_ROOT_LAYOUT: readonly ["note", "draft", ".data", string, string, string, string, string, string, string, string];
+export declare const MANAGED_ROOT_LAYOUT: readonly ["note", "draft", ".data", string, string, string, string, string, string, string, string, string, string];
 export declare function getNotesPath(rootPath: string): string;
 export declare function getNormalNotesPath(rootPath: string): string;
 export declare function getDraftNotesPath(rootPath: string): string;

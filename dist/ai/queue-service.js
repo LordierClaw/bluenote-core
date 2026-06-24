@@ -1,10 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
 import { SelectorNotFoundError } from "../core/errors.js";
 import { selectNote } from "../core/select-note.js";
 import { systemClock } from "../platform/clock.js";
 import { createNoteRepository } from "../storage/note-repository.js";
-import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { createAiQueueRepository } from "./queue-repository.js";
 export function hashDescribeNoteContent(input) {
     const canonicalInput = JSON.stringify({
@@ -109,20 +107,14 @@ export function dropDescribeNoteJobIfNoteMissing(rootPath, job) {
     if (job.kind !== "describe-note") {
         return false;
     }
-    let key = job.key;
     try {
-        const selected = selectNote({ repository: createNoteRepository(rootPath), selector: job.key, visibility: "all" });
-        key = selected.frontmatter.id;
+        selectNote({ repository: createNoteRepository(rootPath), selector: job.key, visibility: "all" });
     }
     catch (error) {
         if (error instanceof SelectorNotFoundError) {
             return removeDescribeNoteJob(rootPath, job.key);
         }
         throw error;
-    }
-    const sidecars = createSidecarRepository(rootPath);
-    if (!existsSync(sidecars.getSidecarPath(key))) {
-        return removeDescribeNoteJob(rootPath, job.key);
     }
     return false;
 }

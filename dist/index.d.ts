@@ -11,6 +11,7 @@ import { type PromoteDraftOptions, type PromoteDraftSummary } from "./core/promo
 import { type SearchNoteMatch } from "./core/search-notes.js";
 import { type RebuildIndexesOptions, type RebuildIndexesSummary } from "./core/rebuild-indexes.js";
 import type { NoteVisibilityOptions } from "./core/note-visibility.js";
+import { type SyncLinkOptions, type SyncLinkSummary, type SyncNowOptions, type SyncNowSummary, type SyncRepairOptions, type SyncRepairSummary, type SyncStatusView, type SyncUnlinkSummary } from "./sync/core-sync.js";
 export * from "./core/errors.js";
 export type * from "./core/types.js";
 export * from "./core/archive-note.js";
@@ -65,6 +66,15 @@ export * from "./storage/root-layout.js";
 export * from "./storage/sidecar-repository.js";
 export * from "./storage/sidecar-schema.js";
 export * from "./storage/state-manifest.js";
+export * from "./sync/core-sync.js";
+export * from "./sync/types.js";
+export * from "./sync/protocol.js";
+export * from "./sync/dirty-repository.js";
+export * from "./sync/folder-repository.js";
+export { ensureSyncDatabase, getSyncDatabasePath, SYNC_SCHEMA_VERSION, serializeSyncMetadata, parseSyncMetadata, } from "./sync/sync-db.js";
+export type { EnsureSyncDatabaseOptions, EnsureSyncDatabaseResult, SyncDatabaseRole, SyncJsonObject, } from "./sync/sync-db.js";
+export * from "./sync/status-repository.js";
+export * from "./sync/tombstone-repository.js";
 export * from "./search/contains-match.js";
 export type { InitRootSummary, NoteSummary, ShowNoteSummary, CreateNoteOptions, CreateNoteSummary, DeleteNoteSummary, ArchiveNoteSummary, RenameNoteSummary, MoveNoteSummary, PromoteDraftSummary, SearchNoteMatch, RebuildIndexesSummary, };
 export interface BlueNoteCoreConfig extends Omit<ResolveBlueNoteRootOptions, "override"> {
@@ -97,6 +107,13 @@ export interface BlueNoteCore {
     };
     search: {
         search(query: string, options?: SearchOptions): SearchNoteMatch[];
+    };
+    sync: {
+        status(options?: BlueNoteCoreRootOptions): SyncStatusView;
+        link(options: SyncLinkOptions & BlueNoteCoreRootOptions): SyncLinkSummary;
+        unlink(options?: BlueNoteCoreRootOptions): SyncUnlinkSummary;
+        now(options?: SyncNowOptions & BlueNoteCoreRootOptions): SyncNowSummary;
+        repair(options?: SyncRepairOptions & BlueNoteCoreRootOptions): SyncRepairSummary;
     };
     rebuild(options?: RebuildOptions): RebuildIndexesSummary;
 }

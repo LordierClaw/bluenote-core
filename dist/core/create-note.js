@@ -7,11 +7,16 @@ import { createNoteDescription } from "../domain/note-description.js";
 import { createDraftNoteKey, createNoteKey } from "../domain/note-key.js";
 import { rebuildIndexes } from "./rebuild-indexes.js";
 import { systemClock } from "../platform/clock.js";
+import { createNoteId } from "../platform/ids.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { ensureManagedRoot, getStateNotesPath } from "../storage/root-layout.js";
+import { createSidecarRepository } from "../storage/sidecar-repository.js";
+import { recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
+const STORAGE_SAFE_NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 function listExistingCreateKeys(rootPath, repository) {
     const existingKeys = new Set(repository.listNotePaths().map((record) => path.basename(record.relativePath, ".md")));
     const stateNotesPath = getStateNotesPath(rootPath);
+    const sidecars = createSidecarRepository(rootPath);
     if (!existsSync(stateNotesPath)) {
         return existingKeys;
     }
@@ -19,7 +24,13 @@ function listExistingCreateKeys(rootPath, repository) {
         if (!entry.isFile() || !entry.name.endsWith(".json")) {
             continue;
         }
-        existingKeys.add(path.basename(entry.name, ".json"));
+        const storageIdentifier = path.basename(entry.name, ".json");
+        try {
+            existingKeys.add(sidecars.read(storageIdentifier).key);
+        }
+        catch {
+            existingKeys.add(storageIdentifier);
+        }
     }
     return existingKeys;
 }
@@ -38,6 +49,12 @@ export function createNote(options) {
     const timestamp = clock.now().toISOString();
     const repository = createNoteRepository(rootPath);
     const existingKeys = listExistingCreateKeys(rootPath, repository);
+    const noteId = (options.noteIdGenerator ?? createNoteId)();
+    if (!STORAGE_SAFE_NOTE_ID_PATTERN.test(noteId)) {
+        throw new UsageError("Generated noteId must be a non-empty storage-safe string.", {
+            hint: "Use a note ID containing only letters, numbers, underscores, and hyphens.",
+        });
+    }
     const type = options.type ?? "draft";
     let title;
     let key;
@@ -79,6 +96,7 @@ export function createNote(options) {
     }
     const description = createNoteDescription(options.body ?? "");
     const created = repository.create({
+        noteId,
         frontmatter: {
             id: key,
             schemaVersion: 1,
@@ -107,7 +125,16 @@ export function createNote(options) {
             clock,
         });
     }
+    recordSyncMutationBestEffort(rootPath, {
+        notes: [{
+                entityId: noteId,
+                markedAt: timestamp,
+                metadata: { key, relativePath: created.relativePath, title },
+            }],
+        folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
+    });
     return {
+        noteId,
         key,
         title,
         description,

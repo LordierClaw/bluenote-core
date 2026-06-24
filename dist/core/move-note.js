@@ -2,6 +2,7 @@ import path from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolveBlueNoteRoot } from "../config/root.js";
 import { createNoteRepository } from "../storage/note-repository.js";
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
 import { selectNote } from "./select-note.js";
 import { UsageError } from "./errors.js";
 function updateLatestOpenedPathIfMatched(rootPath, previousRelativePath, nextRelativePath) {
@@ -20,9 +21,24 @@ export function moveNote(options) {
     const rootPath = resolveBlueNoteRoot(options);
     const repository = createNoteRepository(rootPath);
     const selected = selectNote({ repository, selector: options.selector });
+    const syncEntityId = getNoteSyncEntityId(rootPath, selected);
+    const markedAt = options.updatedAt ?? new Date().toISOString();
     try {
-        const moved = repository.moveNote(path.join(rootPath, selected.sourcePath), options.destinationFolder, options.updatedAt ?? new Date().toISOString());
+        const moved = repository.moveNote(path.join(rootPath, selected.sourcePath), options.destinationFolder, markedAt);
         updateLatestOpenedPathIfMatched(rootPath, moved.previousRelativePath, moved.relativePath);
+        recordSyncMutationBestEffort(rootPath, {
+            notes: [{
+                    entityId: syncEntityId,
+                    markedAt,
+                    metadata: {
+                        key: moved.key,
+                        previousRelativePath: moved.previousRelativePath,
+                        relativePath: moved.relativePath,
+                        title: selected.frontmatter.title,
+                    },
+                }],
+            folders: [{ relativePath: options.destinationFolder, markedAt }],
+        });
         return {
             ...moved,
             title: selected.frontmatter.title,

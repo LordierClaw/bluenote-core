@@ -3,6 +3,7 @@ import { IndexValidationFailedError, UsageError } from "./errors.js";
 import { joinPortableRelativePath } from "../platform/path-safety.js";
 import { systemClock } from "../platform/clock.js";
 import { createNoteRepository } from "../storage/note-repository.js";
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
 import { ensureManagedRoot } from "../storage/root-layout.js";
 import { rebuildIndexes } from "./rebuild-indexes.js";
 import { selectNote } from "./select-note.js";
@@ -18,6 +19,7 @@ export function archiveNote(options) {
     const rootPath = ensureManagedRoot(resolveBlueNoteRoot(options));
     const repository = createNoteRepository(rootPath);
     const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility ?? "normal" });
+    const syncEntityId = getNoteSyncEntityId(rootPath, selected);
     if (isArchivedNote(selected)) {
         throw new UsageError(`Note '${selected.sourcePath}' is already archived.`, {
             hint: "Choose an active note from bn list instead.",
@@ -38,6 +40,19 @@ export function archiveNote(options) {
     if (rebuildSummary.validationErrors.length > 0) {
         throwArchiveValidationError("after", selected.sourcePath, rebuildSummary.validationErrors);
     }
+    recordSyncMutationBestEffort(rootPath, {
+        notes: [{
+                entityId: syncEntityId,
+                markedAt: archivedAt,
+                metadata: {
+                    archivedAt,
+                    key: selected.frontmatter.id,
+                    previousRelativePath: selected.sourcePath,
+                    relativePath: archived.relativePath,
+                    title: selected.frontmatter.title,
+                },
+            }],
+    });
     return {
         rootPath,
         notePath: archived.notePath,

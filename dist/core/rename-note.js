@@ -5,6 +5,7 @@ import { createNoteKey } from "../domain/note-key.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { selectNote } from "./select-note.js";
 import { joinPortableRelativePath } from "../platform/path-safety.js";
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
 import { UsageError } from "./errors.js";
 function buildRecoveryArtifactPath(rootPath, previousKey, nextKey) {
     const safePreviousKey = previousKey.replace(/[^a-z0-9-]+/gi, "-");
@@ -28,6 +29,7 @@ export function renameNote(options) {
     const repository = createNoteRepository(rootPath);
     const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility });
     const currentKey = selected.frontmatter.id;
+    const syncEntityId = getNoteSyncEntityId(rootPath, selected);
     let nextKey;
     try {
         nextKey = createNoteKey(options.title, {
@@ -67,6 +69,19 @@ export function renameNote(options) {
             // Best-effort cleanup: a stale recovery artifact is safer than reporting a successful rename as failed.
         }
         updateLatestOpenedPathIfMatched(rootPath, renamed.previousRelativePath, renamed.relativePath);
+        recordSyncMutationBestEffort(rootPath, {
+            notes: [{
+                    entityId: syncEntityId,
+                    markedAt: options.updatedAt,
+                    metadata: {
+                        key: renamed.key,
+                        previousKey: renamed.previousKey,
+                        previousRelativePath: renamed.previousRelativePath,
+                        relativePath: renamed.relativePath,
+                        title: options.title,
+                    },
+                }],
+        });
         return renamed;
     }
     catch (error) {

@@ -13,9 +13,10 @@ const REQUIRED_SIDECAR_FIELDS = [
     "archivedAt",
     "namingVersion",
 ];
-const OPTIONAL_SIDECAR_FIELDS = ["ai"];
+const OPTIONAL_SIDECAR_FIELDS = ["noteId", "ai"];
 const AI_FIELDS = ["description"];
 const AI_DESCRIPTION_FIELDS = ["lastProcessedAt"];
+const STORAGE_SAFE_NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 function inferNoteType(relativePath, archivedAt) {
     if (archivedAt !== null || relativePath.startsWith(".data/archive/")) {
         return "archived";
@@ -92,6 +93,20 @@ function assertDescriptionField(record, sourcePath) {
     }
     return value;
 }
+function validateNoteIdMetadata(record, sourcePath, validationKind, options) {
+    if (record.noteId === undefined) {
+        if (options.requireNoteId === true) {
+            throw new InvalidFrontmatterError(`Invalid ${validationKind} in ${sourcePath}: 'noteId' must be a non-empty string.`);
+        }
+        return undefined;
+    }
+    if (typeof record.noteId !== "string"
+        || record.noteId.trim() === ""
+        || !STORAGE_SAFE_NOTE_ID_PATTERN.test(record.noteId)) {
+        throw new InvalidFrontmatterError(`Invalid ${validationKind} in ${sourcePath}: 'noteId' must be a non-empty storage-safe string.`);
+    }
+    return record.noteId;
+}
 function validateAiMetadata(value, sourcePath, validationKind) {
     if (value === undefined) {
         return undefined;
@@ -116,13 +131,14 @@ function validateAiMetadata(value, sourcePath, validationKind) {
         },
     };
 }
-export function validateNoteSidecar(sidecar, sourcePath) {
+export function validateNoteSidecar(sidecar, sourcePath, options = {}) {
     const validationKind = "sidecar metadata";
     if (!isRecord(sidecar)) {
         throw new InvalidFrontmatterError(`Invalid ${validationKind} in ${sourcePath}: expected a JSON object.`);
     }
     assertKnownFields(sidecar, [...REQUIRED_SIDECAR_FIELDS, ...OPTIONAL_SIDECAR_FIELDS], sourcePath, validationKind);
     assertRequiredFields(sidecar, REQUIRED_SIDECAR_FIELDS.filter((field) => field !== "type"), sourcePath, validationKind);
+    const noteId = validateNoteIdMetadata(sidecar, sourcePath, validationKind, options);
     const ai = validateAiMetadata(sidecar.ai, sourcePath, validationKind);
     const relativePath = toPortableRelativePath(assertStringField(sidecar, "relativePath", sourcePath, validationKind));
     const archivedAt = assertArchivedAtField(sidecar, sourcePath);
@@ -130,6 +146,7 @@ export function validateNoteSidecar(sidecar, sourcePath) {
     assertSidecarInvariants(noteType, relativePath, archivedAt, sourcePath);
     return {
         type: noteType,
+        ...(noteId === undefined ? {} : { noteId }),
         key: assertStringField(sidecar, "key", sourcePath, validationKind),
         title: assertStringField(sidecar, "title", sourcePath, validationKind),
         description: assertDescriptionField(sidecar, sourcePath),

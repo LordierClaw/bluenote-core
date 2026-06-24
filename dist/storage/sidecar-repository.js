@@ -6,6 +6,10 @@ import { assertPathInsideRoot } from "../platform/path-safety.js";
 import { validateNoteSidecar } from "./sidecar-schema.js";
 function getWriteValidationSourcePath(sidecar) {
     if (typeof sidecar === "object" && sidecar !== null) {
+        const candidateNoteId = sidecar.noteId;
+        if (typeof candidateNoteId === "string") {
+            return path.join(STATE_NOTES_DIRECTORY, `${candidateNoteId}.json`);
+        }
         const candidateKey = sidecar.key;
         if (typeof candidateKey === "string") {
             return path.join(STATE_NOTES_DIRECTORY, `${candidateKey}.json`);
@@ -40,35 +44,46 @@ function removeTemporarySidecar(sidecarPath) {
 export function createSidecarRepository(rootPath) {
     const normalizedRootPath = path.resolve(rootPath);
     const normalizedStateNotesPath = path.join(normalizedRootPath, STATE_NOTES_DIRECTORY);
-    function getSidecarPath(key) {
-        return assertPathInsideRoot(normalizedStateNotesPath, path.join(normalizedStateNotesPath, `${key}.json`));
+    function getSidecarPath(keyOrNoteId) {
+        return assertPathInsideRoot(normalizedStateNotesPath, path.join(normalizedStateNotesPath, `${keyOrNoteId}.json`));
+    }
+    function getSidecarPathByNoteId(noteId) {
+        return getSidecarPath(noteId);
+    }
+    function readSidecar(identifier) {
+        const sidecarPath = getSidecarPath(identifier);
+        let rawJson;
+        try {
+            rawJson = fs.readFileSync(sidecarPath, "utf8");
+        }
+        catch (error) {
+            wrapSidecarRepositoryError("read", path.join(STATE_NOTES_DIRECTORY, `${identifier}.json`), error);
+        }
+        let parsed;
+        try {
+            parsed = JSON.parse(rawJson);
+        }
+        catch (error) {
+            throw new UsageError(`Could not parse sidecar '${path.join(STATE_NOTES_DIRECTORY, `${identifier}.json`)}'.`, {
+                hint: "Ensure sidecar files contain valid JSON metadata.",
+                cause: error,
+            });
+        }
+        return validateNoteSidecar(parsed, path.join(STATE_NOTES_DIRECTORY, `${identifier}.json`));
     }
     return {
         getSidecarPath,
+        getSidecarPathByNoteId,
         read(key) {
-            const sidecarPath = getSidecarPath(key);
-            let rawJson;
-            try {
-                rawJson = fs.readFileSync(sidecarPath, "utf8");
-            }
-            catch (error) {
-                wrapSidecarRepositoryError("read", path.join(STATE_NOTES_DIRECTORY, `${key}.json`), error);
-            }
-            let parsed;
-            try {
-                parsed = JSON.parse(rawJson);
-            }
-            catch (error) {
-                throw new UsageError(`Could not parse sidecar '${path.join(STATE_NOTES_DIRECTORY, `${key}.json`)}'.`, {
-                    hint: "Ensure sidecar files contain valid JSON metadata.",
-                    cause: error,
-                });
-            }
-            return validateNoteSidecar(parsed, path.join(STATE_NOTES_DIRECTORY, `${key}.json`));
+            return readSidecar(key);
+        },
+        readByNoteId(noteId) {
+            return readSidecar(noteId);
         },
         write(sidecar) {
             const canonicalSidecar = validateNoteSidecar(sidecar, getWriteValidationSourcePath(sidecar));
-            const sidecarPath = getSidecarPath(canonicalSidecar.key);
+            const pathIdentifier = canonicalSidecar.noteId ?? canonicalSidecar.key;
+            const sidecarPath = getSidecarPath(pathIdentifier);
             const temporarySidecarPath = getTemporarySidecarPath(sidecarPath);
             try {
                 fs.mkdirSync(path.dirname(sidecarPath), { recursive: true });
@@ -77,7 +92,7 @@ export function createSidecarRepository(rootPath) {
             }
             catch (error) {
                 removeTemporarySidecar(temporarySidecarPath);
-                wrapSidecarRepositoryError("write", path.join(STATE_NOTES_DIRECTORY, `${canonicalSidecar.key}.json`), error);
+                wrapSidecarRepositoryError("write", path.join(STATE_NOTES_DIRECTORY, `${pathIdentifier}.json`), error);
             }
             return sidecarPath;
         },
