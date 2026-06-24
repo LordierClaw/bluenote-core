@@ -87,4 +87,37 @@ describe("sync log", () => {
       safe: "visible",
     })
   })
+
+  test("redacts fragment tokens and non-obvious raw body fields", () => {
+    assert.equal(
+      redactSyncLogValue("https://sync.example.test/callback#access_token=abc&id_token=def&safe=value"),
+      "https://sync.example.test/callback#access_token=%5Bredacted%5D&id_token=%5Bredacted%5D&safe=value",
+    )
+
+    assert.deepEqual(redactSyncLogValue({
+      noteBody: "Do not leak note body.",
+      rawRequest: { url: "https://example.test/?safe=1", payload: "Do not leak payload." },
+      rawResponse: { text: "Do not leak text." },
+      safe: "visible",
+    }), {
+      noteBody: "[redacted]",
+      rawRequest: "[redacted]",
+      rawResponse: "[redacted]",
+      safe: "visible",
+    })
+  })
+
+  test("logger owns timestamp and default level fields", async () => {
+    await withTempRoot(async (rootPath) => {
+      const writer = createSyncLogWriter({ rootPath, now: () => new Date("2026-06-24T12:34:56.789Z") })
+
+      await writer.write({ event: "sync.test", timestamp: "caller timestamp", level: undefined })
+
+      const rawLog = await readFile(path.join(rootPath, ".data", "sync", "logs", "2026-06-24.jsonl"), "utf8")
+      const entry = JSON.parse(rawLog.trim()) as Record<string, unknown>
+
+      assert.equal(entry.timestamp, "2026-06-24T12:34:56.789Z")
+      assert.equal(entry.level, "info")
+    })
+  })
 })

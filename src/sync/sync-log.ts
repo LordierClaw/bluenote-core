@@ -52,8 +52,11 @@ const redactedFieldNames = new Set([
   "headers",
   "idtoken",
   "notebodies",
+  "notebody",
   "password",
   "rawbody",
+  "rawrequest",
+  "rawresponse",
   "refreshtoken",
   "request",
   "requestbody",
@@ -93,9 +96,24 @@ function redactUrl(rawValue: string): string | undefined {
         query.set(key, redacted)
       }
     }
+
+    const fragment = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash
+    const fragmentQuery = new URLSearchParams(fragment)
+    let redactedFragment = fragment
+    if (fragment !== "") {
+      let changed = false
+      for (const key of [...fragmentQuery.keys()]) {
+        if (isRedactedQueryKey(key)) {
+          fragmentQuery.set(key, redacted)
+          changed = true
+        }
+      }
+      redactedFragment = changed ? fragmentQuery.toString() : fragment
+    }
+
     const userInfo = parsed.username !== "" || parsed.password !== "" ? `${redacted}@` : ""
     const search = query.toString()
-    return `${parsed.protocol}//${userInfo}${parsed.host}${parsed.pathname}${search === "" ? "" : `?${search}`}${parsed.hash}`
+    return `${parsed.protocol}//${userInfo}${parsed.host}${parsed.pathname}${search === "" ? "" : `?${search}`}${redactedFragment === "" ? "" : `#${redactedFragment}`}`
   } catch {
     return undefined
   }
@@ -158,7 +176,8 @@ export function createSyncLogWriter(options: CreateSyncLogWriterOptions): SyncLo
   return {
     async write(record: SyncLogRecord): Promise<void> {
       const timestamp = now().toISOString()
-      const entry = redactSyncLogValue({ timestamp, level: record.level ?? "info", ...record })
+      const { timestamp: _recordTimestamp, level: recordLevel, ...recordFields } = record
+      const entry = redactSyncLogValue({ ...recordFields, timestamp, level: recordLevel ?? "info" })
       const logPath = path.join(logDir, `${timestamp.slice(0, 10)}.jsonl`)
       await mkdir(logDir, { recursive: true })
       await appendFile(logPath, `${JSON.stringify(entry)}\n`, "utf8")
