@@ -1,7 +1,8 @@
 import path from "node:path"
-import { existsSync, readdirSync, statSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
 
 import { resolveBlueNoteRoot, type ResolveBlueNoteRootOptions } from "../config/root"
+import { UsageError } from "../core/errors"
 import { ensureManagedRoot, getNormalNotesPath } from "../storage/root-layout"
 import { createNoteRepository } from "../storage/note-repository"
 import { readStateManifest } from "../storage/state-manifest"
@@ -64,6 +65,28 @@ function collectExistingNoteFolders(rootPath: string): string[] {
   return folders.sort()
 }
 
+function assertSupportedLinkMode(mode: string): asserts mode is "seed-empty-server-from-local" {
+  if (mode !== "seed-empty-server-from-local") {
+    throw new UsageError("Unsupported sync link mode.", {
+      hint: "Use mode 'seed-empty-server-from-local'.",
+    })
+  }
+}
+
+function assertValidServerUrl(serverUrl: string): void {
+  try {
+    const parsed = new URL(serverUrl)
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Unsupported protocol")
+    }
+  } catch (error) {
+    throw new UsageError("Invalid sync server URL.", {
+      hint: "Provide an http:// or https:// sync server URL.",
+      cause: error,
+    })
+  }
+}
+
 export function getCoreSyncStatus(options: ResolveBlueNoteRootOptions = {}): SyncStatusView {
   const rootPath = resolveBlueNoteRoot(options)
   const runtimeMode = readSyncRuntimeMode(rootPath)
@@ -103,17 +126,16 @@ export function getCoreSyncStatus(options: ResolveBlueNoteRootOptions = {}): Syn
 
 export function linkCoreSync(options: SyncLinkOptions & ResolveBlueNoteRootOptions): SyncLinkSummary {
   const { mode, serverUrl, workspaceId: requestedWorkspaceId, ...rootOptions } = options
-  if (mode !== "seed-empty-server-from-local") {
-    throw new Error("Unsupported sync link mode.")
-  }
+  assertSupportedLinkMode(mode)
+  assertValidServerUrl(serverUrl)
 
   const rootPath = resolveManagedRoot(rootOptions)
   const workspaceId = requestedWorkspaceId ?? readStateManifest(rootPath).workspaceId
   if (!workspaceId) {
-    throw new Error("Cannot link sync without a workspace ID.")
+    throw new UsageError("Cannot link sync without a workspace ID.", {
+      hint: "Initialize or repair the BlueNote root before linking sync.",
+    })
   }
-
-  setSyncRuntimeMode(rootPath, { mode: "sync-client", workspaceId })
 
   const markedAt = new Date().toISOString()
   const identity = { role: "client" as const, workspaceId }
@@ -150,6 +172,8 @@ export function linkCoreSync(options: SyncLinkOptions & ResolveBlueNoteRootOptio
     updatedAt: markedAt,
     lastError: null,
   })
+
+  setSyncRuntimeMode(rootPath, { mode: "sync-client", workspaceId })
 
   return {
     state: "linked",

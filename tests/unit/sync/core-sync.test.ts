@@ -5,7 +5,7 @@ import path from "node:path"
 import { existsSync, readFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 
-import { createBlueNoteCore, createDirtyRecordRepository } from "@lordierclaw/bluenote-core"
+import { createBlueNoteCore, createDirtyRecordRepository, UsageError } from "@lordierclaw/bluenote-core"
 import { readSyncRuntimeMode } from "../../../src/sync/runtime-mode"
 import { getStateManifestPath, readStateManifest } from "../../../src/storage/state-manifest"
 
@@ -79,6 +79,55 @@ describe("createBlueNoteCore sync namespace", () => {
           ["note", first.noteId, "upsert"],
           ["note", second.noteId, "upsert"],
         ].sort(),
+      )
+      assert.deepEqual(core.sync.status(), {
+        state: "linked",
+        mode: "sync-client",
+        activity: "idle",
+        workspaceId: summary.workspaceId,
+        pendingCount: 4,
+        runningCount: 0,
+        failedCount: 0,
+        lastError: null,
+      })
+      assert.deepEqual(core.sync.now(), { status: "transport-not-configured", pushed: 0, pulled: 0 })
+    })
+  })
+
+  test("link keeps runtime mode standalone if initial dirty seeding fails", async () => {
+    await withTempRoot("bluenote-core-sync-link-seed-failure-", async (rootPath) => {
+      const core = createBlueNoteCore({ rootPath })
+      core.init()
+      const created = core.notes.create({
+        type: "draft",
+        title: "Seed Failure",
+        body: "This local note should remain standalone if seeding fails.",
+        enqueueAi: false,
+        noteIdGenerator: () => "note_seed_failure",
+      })
+      await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
+
+      assert.throws(
+        () => core.sync.link({ mode: "seed-empty-server-from-local", serverUrl: "https://sync.example.test" }),
+        /busy/,
+      )
+      assert.deepEqual(readSyncRuntimeMode(rootPath), { mode: "standalone" })
+      assert.equal(existsSync(created.notePath), true)
+    })
+  })
+
+  test("link reports user-facing validation errors", async () => {
+    await withTempRoot("bluenote-core-sync-link-validation-", (rootPath) => {
+      const core = createBlueNoteCore({ rootPath })
+      core.init()
+
+      assert.throws(
+        () => core.sync.link({ mode: "unsupported" as "seed-empty-server-from-local", serverUrl: "https://sync.example.test" }),
+        UsageError,
+      )
+      assert.throws(
+        () => core.sync.link({ mode: "seed-empty-server-from-local", serverUrl: "" }),
+        UsageError,
       )
     })
   })
