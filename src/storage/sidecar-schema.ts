@@ -194,13 +194,11 @@ function validateNoteIdMetadata(
     return undefined
   }
 
-  const noteId = assertStringField(record, "noteId", sourcePath, validationKind)
-
-  if (options.requireNoteId === true && noteId.trim() === "") {
+  if (typeof record.noteId !== "string" || record.noteId.trim() === "") {
     throw new InvalidFrontmatterError(`Invalid ${validationKind} in ${sourcePath}: 'noteId' must be a non-empty string.`)
   }
 
-  return noteId
+  return record.noteId
 }
 
 function validateAiMetadata(

@@ -139,6 +139,20 @@ test("validateNoteSidecar rejects schema 3 sidecars missing noteId", () => {
   )
 })
 
+test("validateNoteSidecar rejects present noteId values that are not non-empty strings", () => {
+  for (const noteId of ["", "   ", 123]) {
+    assert.throws(
+      () => validateNoteSidecar({ ...canonicalSidecar(), noteId }, ".data/notes/note-work-24-abc123.json"),
+      (error: unknown) => {
+        assert.ok(error instanceof InvalidFrontmatterError)
+        assert.match(error.message, /noteId/i)
+        assert.match(error.message, /non-empty string/i)
+        return true
+      },
+    )
+  }
+})
+
 test("validateNoteSidecar keeps legacy schema 2 sidecars readable without noteId", () => {
   const sidecar = validateNoteSidecar(canonicalSidecar(), ".data/notes/note-work-24-abc123.json", {
     requireNoteId: false,
