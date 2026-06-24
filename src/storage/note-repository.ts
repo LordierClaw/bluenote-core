@@ -627,7 +627,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       } catch (error) {
         const rollbackErrors: unknown[] = []
 
-        if (removedPreviousNote) {
+        if (removedPreviousNote || (wroteNextNote && nextNotePath === normalizedNotePath)) {
           try {
             fs.writeFileSync(normalizedNotePath, createPlainNoteMarkdown(previousRelativePath, existing.body), "utf8")
           } catch (rollbackError) {

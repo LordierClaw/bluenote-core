@@ -608,6 +608,56 @@ test("repository rename restores noteId-keyed sidecar when removing the old note
   }
 })
 
+test("repository rename restores the note body when same-path sidecar persistence fails", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-rename-same-path-sidecar-failure-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    const created = repository.create({
+      frontmatter: FIXED_FRONTMATTER,
+      body: "Original body.\n",
+    })
+    const sidecarPath = path.join(getStateNotesPath(rootPath), "note-123.json")
+    const originalSidecar = await readFile(sidecarPath, "utf8")
+    const originalWriteFileSync = fs.writeFileSync
+    const sidecarFailure = new Error("simulated same-path sidecar write failure")
+    const writeFileMock = mockMethod(fs, "writeFileSync", (...args: Parameters<typeof fs.writeFileSync>) => {
+      const [target] = args
+
+      if (path.resolve(String(target)).startsWith(path.resolve(sidecarPath))) {
+        throw sidecarFailure
+      }
+
+      return originalWriteFileSync(...args)
+    })
+
+    try {
+      assert.throws(
+        () =>
+          repository.rename(created.notePath, {
+            nextKey: "note-123",
+            title: "Updated title",
+            body: "Updated body.\n",
+            updatedAt: "2026-05-21T12:30:00.000Z",
+          }),
+        (error) => {
+          assert.ok(error instanceof UsageError)
+          assert.ok(error.cause instanceof UsageError)
+          assert.equal(error.cause.cause, sidecarFailure)
+          return true
+        },
+      )
+    } finally {
+      writeFileMock.mock.restore()
+    }
+
+    assert.equal(await readFile(created.notePath, "utf8"), "Original body.\n")
+    assert.equal(await readFile(sidecarPath, "utf8"), originalSidecar)
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("syncEditedNote preserves the previous note body when the atomic body write fails", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-sync-atomic-failure-"))
 
