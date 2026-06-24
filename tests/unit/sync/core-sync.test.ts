@@ -169,8 +169,16 @@ describe("createBlueNoteCore sync namespace", () => {
       assert.deepEqual(core.sync.repair({ dryRun: true }), {
         dryRun: true,
         changed: false,
-        issuesFound: 0,
+        issuesFound: 1,
         repairsApplied: 0,
+        issues: [
+          {
+            code: "missing-sync-database",
+            severity: "warning",
+            message: "Sync database is missing.",
+            suggestion: "Recreate .data/sync/sync.sqlite before running linked sync operations.",
+          },
+        ],
       })
       assert.equal(readFileSync(getStateManifestPath(rootPath), "utf8"), manifestBefore)
       assert.equal(existsSync(runtimeModePath), false)

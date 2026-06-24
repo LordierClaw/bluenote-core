@@ -96,6 +96,7 @@ describe("@lordierclaw/bluenote-core public API", () => {
       changed: false,
       issuesFound: 0,
       repairsApplied: 0,
+      issues: [],
     }
 
     assert.equal(status.activity, "idle")

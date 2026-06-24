@@ -12,6 +12,7 @@ import { createSyncClientService } from "./client-service"
 import { getNoteSyncEntityId } from "./mutation-tracking"
 import { readSyncRuntimeMode, setSyncRuntimeMode } from "./runtime-mode"
 import { createSyncStatusRepository } from "./status-repository"
+import { repairSyncState } from "./repair"
 import type { DownloadNoteBodyResponse, PullChangesRequest, PullChangesResponse, PushRequest, PushResponse } from "./protocol"
 import type {
   SyncLinkOptions,
@@ -231,10 +232,6 @@ export function syncCoreNow(options: SyncNowOptions & ResolveBlueNoteRootOptions
 }
 
 export function repairCoreSync(options: SyncRepairOptions & ResolveBlueNoteRootOptions = {}): SyncRepairSummary {
-  return {
-    dryRun: options.dryRun ?? true,
-    changed: false,
-    issuesFound: 0,
-    repairsApplied: 0,
-  }
+  const { dryRun, confirm, ...rootOptions } = options
+  return repairSyncState(resolveBlueNoteRoot(rootOptions), { dryRun, confirm })
 }
