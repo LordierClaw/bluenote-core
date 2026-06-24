@@ -74,4 +74,17 @@ describe("sync log", () => {
       "https://[redacted]@sync.example.test/path?token=%5Bredacted%5D&safe=value&client_secret=%5Bredacted%5D",
     )
   })
+
+  test("redacts token-like query key variants and credential fields", () => {
+    assert.equal(
+      redactSyncLogValue("https://sync.example.test/path?accessToken=abc&refreshToken=def&auth_token=ghi&sessionToken=jkl&safe=value"),
+      "https://sync.example.test/path?accessToken=%5Bredacted%5D&refreshToken=%5Bredacted%5D&auth_token=%5Bredacted%5D&sessionToken=%5Bredacted%5D&safe=value",
+    )
+
+    assert.deepEqual(redactSyncLogValue({ credential: "single-secret", credentials: "multi-secret", safe: "visible" }), {
+      credential: "[redacted]",
+      credentials: "[redacted]",
+      safe: "visible",
+    })
+  })
 })

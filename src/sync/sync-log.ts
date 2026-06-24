@@ -47,6 +47,8 @@ const redactedFieldNames = new Set([
   "content",
   "contenttext",
   "cookie",
+  "credential",
+  "credentials",
   "headers",
   "idtoken",
   "notebodies",
@@ -74,12 +76,20 @@ function isRedactedFieldName(key: string): boolean {
   return normalized.endsWith("token") || normalized.endsWith("secret") || normalized.endsWith("password")
 }
 
+function isRedactedQueryKey(key: string): boolean {
+  const normalized = normalizeFieldName(key)
+  if (secretQueryKeys.has(key.toLowerCase()) || secretQueryKeys.has(normalized)) {
+    return true
+  }
+  return normalized.endsWith("token") || normalized.endsWith("secret") || normalized.endsWith("password")
+}
+
 function redactUrl(rawValue: string): string | undefined {
   try {
     const parsed = new URL(rawValue)
     const query = new URLSearchParams(parsed.search)
     for (const key of [...query.keys()]) {
-      if (secretQueryKeys.has(key.toLowerCase())) {
+      if (isRedactedQueryKey(key)) {
         query.set(key, redacted)
       }
     }
