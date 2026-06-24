@@ -81,7 +81,7 @@ function isRedactedFieldName(key: string): boolean {
   if (redactedFieldNames.has(normalized)) {
     return true
   }
-  return normalized.endsWith("token") || normalized.endsWith("secret") || normalized.endsWith("password") || normalized.endsWith("credential") || normalized.endsWith("credentials") || normalized.endsWith("body") || normalized.endsWith("bodies") || normalized.endsWith("content")
+  return normalized.endsWith("token") || normalized.endsWith("secret") || normalized.endsWith("password") || normalized.endsWith("credential") || normalized.endsWith("credentials") || normalized.endsWith("body") || normalized.endsWith("bodies") || normalized.endsWith("content") || normalized.endsWith("markdown") || normalized.endsWith("text")
 }
 
 function isRedactedQueryKey(key: string): boolean {
@@ -151,8 +151,12 @@ function redactString(value: string): string {
   }
 
   const withEmbeddedUrls = value.replace(/https?:\/\/[^\s"'<>]+/giu, (match) => redactUrl(match) ?? match)
+  const withEmbeddedParams = withEmbeddedUrls.replace(/([?#])([^\s"'<>]+)/gu, (match, prefix: string, rawParams: string) => {
+    const params = redactParams(rawParams)
+    return params.changed ? `${prefix}${params.value}` : match
+  })
 
-  return withEmbeddedUrls
+  return withEmbeddedParams
     .replace(/\/\/[^/@\s]+@/gu, `//${redacted}@`)
     .replace(/([?&](?:access_token|api_key|apikey|auth|authorization|client_secret|code|id_token|key|password|refresh_token|secret|token)=)[^&#\s]+/giu, `$1${redacted}`)
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/giu, `Bearer ${redacted}`)
