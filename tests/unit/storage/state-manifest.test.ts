@@ -14,8 +14,18 @@ import {
 } from "../../../src/storage/state-manifest"
 
 test("createDefaultStateManifest returns the current storage schema version", () => {
-  assert.deepEqual(createDefaultStateManifest(), {
-    schemaVersion: STORAGE_SCHEMA_VERSION,
+  const manifest = createDefaultStateManifest()
+
+  assert.equal(manifest.schemaVersion, 3)
+  assert.equal(manifest.schemaVersion, STORAGE_SCHEMA_VERSION)
+  assert.equal(typeof manifest.workspaceId, "string")
+  assert.notEqual(manifest.workspaceId, "")
+})
+
+test("createDefaultStateManifest supports deterministic workspace ID generation", () => {
+  assert.deepEqual(createDefaultStateManifest({ createWorkspaceId: () => "workspace_test" }), {
+    schemaVersion: 3,
+    workspaceId: "workspace_test",
   })
 })
 
@@ -27,13 +37,55 @@ test("writeStateManifest stores manifest.json under .data and readStateManifest 
     assert.equal(manifestPath, path.join(rootPath, ".data", "manifest.json"))
 
     const manifestJson = await readFile(manifestPath, "utf8")
-    assert.deepEqual(JSON.parse(manifestJson), {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-    })
+    const storedManifest = JSON.parse(manifestJson) as { schemaVersion?: unknown; workspaceId?: unknown }
+    assert.equal(storedManifest.schemaVersion, 3)
+    assert.equal(storedManifest.schemaVersion, STORAGE_SCHEMA_VERSION)
+    assert.equal(typeof storedManifest.workspaceId, "string")
+    assert.notEqual(storedManifest.workspaceId, "")
 
-    assert.deepEqual(await readStateManifest(rootPath), {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-    })
+    assert.deepEqual(await readStateManifest(rootPath), storedManifest)
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("readStateManifest accepts schema 2 manifests without workspaceId as legacy standalone manifests", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-state-manifest-schema-2-"))
+
+  try {
+    await writeStateManifest(rootPath)
+    await writeFile(getStateManifestPath(rootPath), JSON.stringify({ schemaVersion: 2 }), "utf8")
+
+    assert.deepEqual(readStateManifest(rootPath), { schemaVersion: 2 })
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("readStateManifest requires schema 3 manifests to include a non-empty string workspaceId", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-state-manifest-schema-3-"))
+
+  try {
+    await writeStateManifest(rootPath)
+
+    for (const manifest of [
+      { schemaVersion: 3 },
+      { schemaVersion: 3, workspaceId: "" },
+      { schemaVersion: 3, workspaceId: 123 },
+    ]) {
+      await writeFile(getStateManifestPath(rootPath), JSON.stringify(manifest), "utf8")
+
+      assert.throws(() => readStateManifest(rootPath), (error: unknown) => {
+        assert.ok(error instanceof RootNotInitializedError)
+        assert.equal(error.message, "BlueNote root is not initialized.")
+        assert.equal(error.hint, "Run 'bn init' to create a valid .data/manifest.json.")
+        return true
+      })
+    }
+
+    await writeFile(getStateManifestPath(rootPath), JSON.stringify({ schemaVersion: 3, workspaceId: "workspace_test" }), "utf8")
+
+    assert.deepEqual(readStateManifest(rootPath), { schemaVersion: 3, workspaceId: "workspace_test" })
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }

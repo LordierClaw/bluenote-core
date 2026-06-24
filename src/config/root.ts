@@ -22,7 +22,7 @@ export const STATE_RECOVERY_DIRECTORY = APP_STATE_RECOVERY_DIRECTORY
 export const STATE_TMP_DIRECTORY = APP_STATE_TMP_DIRECTORY
 export const STATE_LOGS_DIRECTORY = APP_STATE_LOGS_DIRECTORY
 export const STATE_MANIFEST_FILENAME = "manifest.json"
-export const STORAGE_SCHEMA_VERSION = 2
+export const STORAGE_SCHEMA_VERSION = 3
 
 export interface ResolveBlueNoteRootOptions {
   override?: string
