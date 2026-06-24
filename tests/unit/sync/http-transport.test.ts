@@ -212,6 +212,10 @@ describe("sync HTTP transport", () => {
 
   test("redacts credentials and query tokens in URL helpers and HTTP errors", async () => {
     assert.equal(redactSyncHttpUrl("https://user:pass@example.test/sync?token=abc&api_key=def&safe=value"), "https://[redacted]@example.test/sync?token=%5Bredacted%5D&api_key=%5Bredacted%5D&safe=value")
+    assert.equal(
+      redactSyncHttpUrl("https://example.test/sync?accessToken=abc&refreshToken=def&sessionToken=ghi&clientSecret=jkl&safe=value"),
+      "https://example.test/sync?accessToken=%5Bredacted%5D&refreshToken=%5Bredacted%5D&sessionToken=%5Bredacted%5D&clientSecret=%5Bredacted%5D&safe=value",
+    )
 
     const fetch: SyncHttpFetch = async () => jsonResponse({ error: "bad" }, { status: 500, statusText: "Server Error" })
     const transport = createSyncHttpTransport({ baseUrl: "https://user:pass@example.test/sync?token=abc", fetch })

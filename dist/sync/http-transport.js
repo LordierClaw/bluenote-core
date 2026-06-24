@@ -16,6 +16,16 @@ const secretQueryKeys = new Set([
     "secret",
     "token",
 ]);
+function normalizeQueryKey(key) {
+    return key.replace(/[-_\s]/gu, "").toLowerCase();
+}
+function isSecretQueryKey(key) {
+    const normalized = normalizeQueryKey(key);
+    if (secretQueryKeys.has(key.toLowerCase()) || secretQueryKeys.has(normalized)) {
+        return true;
+    }
+    return normalized.endsWith("token") || normalized.endsWith("secret") || normalized.endsWith("password");
+}
 function joinBaseUrl(baseUrl, endpoint) {
     const parsed = new URL(baseUrl);
     const endpointUrl = new URL(endpoint, "http://bluenote.local");
@@ -46,7 +56,7 @@ export function redactSyncHttpUrl(rawUrl) {
         const parsed = new URL(String(rawUrl));
         const query = new URLSearchParams(parsed.search);
         for (const key of [...query.keys()]) {
-            if (secretQueryKeys.has(key.toLowerCase())) {
+            if (isSecretQueryKey(key)) {
                 query.set(key, "[redacted]");
             }
         }
@@ -57,7 +67,7 @@ export function redactSyncHttpUrl(rawUrl) {
     catch {
         return String(rawUrl)
             .replace(/\/\/[^/@\s]+@/g, "//[redacted]@")
-            .replace(/([?&](?:access_token|api_key|apikey|auth|authorization|client_secret|code|id_token|key|password|refresh_token|secret|token)=)[^&#\s]+/gi, "$1[redacted]");
+            .replace(/([?&][^=&#\s]*(?:token|secret|password|credential|credentials|access_token|api_key|apikey|auth|authorization|client_secret|code|id_token|key|refresh_token)[^=&#\s]*=)[^&#\s]+/gi, "$1[redacted]");
     }
 }
 export const redactSyncUrl = redactSyncHttpUrl;

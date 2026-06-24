@@ -2,7 +2,7 @@ import { test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
 // @ts-expect-error sql.js does not ship TypeScript declarations in this project.
@@ -175,6 +175,63 @@ test("server accepts synced draft note upserts", async () => {
       archivedAt: null,
       namingVersion: 1,
     })
+  })
+})
+
+test("server rejects pushed note relocations through symlinked destination parents", async () => {
+  await withRoot(async (rootPath) => {
+    const outsidePath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-server-outside-"))
+    try {
+      const server = createSyncServerService({ rootPath, workspaceId })
+      const initial = server.acceptPush({
+        workspaceId,
+        replicaId: "client-a",
+        baseSequence: 0,
+        noteBodies: { "note-escape": "Original body.\n" },
+        records: [{
+          entityType: "note",
+          entityId: "note-escape",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: {
+            key: "safe-note",
+            title: "Safe Note",
+            relativePath: "note/safe-note.md",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        }],
+      })
+      assert.equal(initial.rejected.length, 0)
+      symlinkSync(outsidePath, path.join(rootPath, "note", "link"), "dir")
+
+      const response = server.acceptPush({
+        workspaceId,
+        replicaId: "client-a",
+        baseSequence: initial.serverSequence,
+        noteBodies: { "note-escape": "Escaped body.\n" },
+        records: [{
+          entityType: "note",
+          entityId: "note-escape",
+          dirtyType: "upsert",
+          clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+          metadata: {
+            key: "escaped",
+            title: "Escaped",
+            relativePath: "note/link/escaped.md",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:01:00.000Z",
+          },
+        }],
+      })
+
+      assert.equal(response.accepted.length, 0)
+      assert.equal(response.rejected.length, 1)
+      assert.equal(existsSync(path.join(outsidePath, "escaped.md")), false)
+      assert.equal(readFileSync(path.join(rootPath, "note", "safe-note.md"), "utf8"), "Original body.\n")
+    } finally {
+      await rm(outsidePath, { recursive: true, force: true })
+    }
   })
 })
 

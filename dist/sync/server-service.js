@@ -88,6 +88,36 @@ function restoreFileSnapshots(snapshots) {
         }
     }
 }
+function assertExistingPathIsNotSymlink(filePath, relativeLabel) {
+    try {
+        if (fs.lstatSync(filePath).isSymbolicLink()) {
+            throw new UsageError(`Sync note path '${relativeLabel}' must not be a symlink.`, {
+                hint: "Remove symlinks from BlueNote-managed note paths before syncing.",
+            });
+        }
+    }
+    catch (error) {
+        if (error instanceof UsageError) {
+            throw error;
+        }
+        if (typeof error === "object" && error !== null && error.code === "ENOENT") {
+            return;
+        }
+        throw error;
+    }
+}
+function assertPathAndParentsAreNotSymlinks(rootPath, targetPath) {
+    const normalizedRootPath = path.resolve(rootPath);
+    const normalizedTargetPath = assertPathInsideRoot(normalizedRootPath, targetPath);
+    const relativePath = path.relative(normalizedRootPath, normalizedTargetPath);
+    const parts = relativePath === "" ? [] : relativePath.split(path.sep).filter(Boolean);
+    let currentPath = normalizedRootPath;
+    assertExistingPathIsNotSymlink(currentPath, path.relative(normalizedRootPath, currentPath) || ".");
+    for (const part of parts) {
+        currentPath = path.join(currentPath, part);
+        assertExistingPathIsNotSymlink(currentPath, path.relative(normalizedRootPath, currentPath));
+    }
+}
 function makeRollback(snapshots) {
     return () => restoreFileSnapshots(snapshots);
 }
@@ -109,6 +139,7 @@ function noteMetadataFromPush(rootPath, record) {
 }
 function ensureSyncNoteFolder(rootPath, relativePath) {
     if (relativePath.startsWith("draft/")) {
+        assertPathAndParentsAreNotSymlinks(rootPath, getDraftNotesPath(rootPath));
         fs.mkdirSync(getDraftNotesPath(rootPath), { recursive: true });
         return;
     }
@@ -116,6 +147,7 @@ function ensureSyncNoteFolder(rootPath, relativePath) {
     const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, folderRelativePath));
     const normalNotesPath = getNormalNotesPath(rootPath);
     assertPathInsideRoot(normalNotesPath, folderPath);
+    assertPathAndParentsAreNotSymlinks(rootPath, folderPath);
     fs.mkdirSync(folderPath, { recursive: true });
 }
 function createDestinationForRelativePath(relativePath) {
@@ -203,6 +235,7 @@ function upsertNote(rootPath, record, body) {
     try {
         ensureSyncNoteFolder(rootPath, metadata.relativePath);
         assertRelativePathAvailable(rootPath, metadata.relativePath, record.entityId);
+        assertPathAndParentsAreNotSymlinks(rootPath, targetPath);
         if (sidecar === null) {
             repository.create({
                 noteId: record.entityId,
