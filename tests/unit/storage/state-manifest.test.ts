@@ -49,6 +49,20 @@ test("writeStateManifest stores manifest.json under .data and readStateManifest 
   }
 })
 
+test("writeStateManifest default writes preserve an existing workspaceId", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-state-manifest-preserve-workspace-"))
+
+  try {
+    await writeStateManifest(rootPath, { schemaVersion: 3, workspaceId: "workspace_existing" })
+
+    await writeStateManifest(rootPath)
+
+    assert.deepEqual(readStateManifest(rootPath), { schemaVersion: STORAGE_SCHEMA_VERSION, workspaceId: "workspace_existing" })
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("readStateManifest accepts schema 2 manifests without workspaceId as legacy standalone manifests", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-state-manifest-schema-2-"))
 

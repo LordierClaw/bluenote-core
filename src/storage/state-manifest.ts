@@ -29,10 +29,32 @@ export function getStateManifestPath(rootPath: string): string {
   return path.join(path.resolve(rootPath), STATE_DIRECTORY, STATE_MANIFEST_FILENAME)
 }
 
-export function writeStateManifest(rootPath: string, manifest: StateManifest = createDefaultStateManifest()): string {
+function readExistingWorkspaceId(rootPath: string): string | undefined {
+  try {
+    return readStateManifest(rootPath).workspaceId
+  } catch {
+    return undefined
+  }
+}
+
+function createStateManifestForWrite(rootPath: string, manifest?: StateManifest): StateManifest {
+  if (manifest !== undefined) {
+    return manifest
+  }
+
+  const existingWorkspaceId = readExistingWorkspaceId(rootPath)
+  if (existingWorkspaceId !== undefined) {
+    return createDefaultStateManifest({ createWorkspaceId: () => existingWorkspaceId })
+  }
+
+  return createDefaultStateManifest()
+}
+
+export function writeStateManifest(rootPath: string, manifest?: StateManifest): string {
   const manifestPath = getStateManifestPath(rootPath)
+  const nextManifest = createStateManifestForWrite(rootPath, manifest)
   mkdirSync(path.dirname(manifestPath), { recursive: true })
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8")
+  writeFileSync(manifestPath, JSON.stringify(nextManifest, null, 2) + "\n", "utf8")
   return manifestPath
 }
 
