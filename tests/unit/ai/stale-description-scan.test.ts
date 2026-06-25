@@ -13,6 +13,7 @@ import { ensureManagedRoot, getAiQueuePath, getInboxNotePath } from "../../../sr
 import { createNoteRepository } from "../../../src/storage/note-repository"
 import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import type { Clock } from "../../../src/platform/clock"
+import { setSyncRuntimeMode } from "../../../src/sync/runtime-mode"
 
 async function withRoot(name: string, callback: (rootPath: string) => Promise<void>): Promise<void> {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), name))
@@ -148,6 +149,27 @@ test("note with no AI description lastProcessedAt enqueues one describe-note job
     assert.equal(queue.jobs[0]?.kind, "describe-note")
     assert.equal(queue.jobs[0]?.key, "project-notes")
     assert.equal(queue.jobs[0]?.relativePath, "note/project-notes.md")
+  })
+})
+
+
+test("sync-client mode disables stale AI description scans", async () => {
+  await withRoot("bluenote-stale-scan-sync-client-", async (rootPath) => {
+    setSyncRuntimeMode(rootPath, { mode: "sync-client", workspaceId: "workspace-ai-sync-client" })
+    createAiConfigRepository(rootPath).write(validAiConfig(true))
+    createStoredNote(rootPath, {
+      key: "server-authoritative-ai",
+      title: "Server authoritative AI",
+      body: "Local stale scan must not enqueue this note.\n",
+      updatedAt: "2026-06-01T10:00:00.000Z",
+    })
+
+    const result = scanAndEnqueueStaleDescriptions(rootPath, {
+      clock: fixedClock("2026-06-01T11:00:00.000Z"),
+    })
+
+    assert.deepEqual(result, { scanned: 0, enqueued: 0 })
+    assert.equal(existsSync(getAiQueuePath(rootPath)), false)
   })
 })
 

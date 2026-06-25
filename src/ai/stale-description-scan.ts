@@ -7,6 +7,7 @@ import type { Clock } from "../platform/clock"
 import { createNoteRepository } from "../storage/note-repository"
 import { createSidecarRepository, type SidecarRepository } from "../storage/sidecar-repository"
 import type { NoteSidecar } from "../storage/sidecar-schema"
+import { readSyncRuntimeMode } from "../sync/runtime-mode"
 
 export interface ScanAndEnqueueStaleDescriptionsOptions {
   clock: Clock
@@ -46,6 +47,10 @@ export function scanAndEnqueueStaleDescriptions(
   rootPath: string,
   options: ScanAndEnqueueStaleDescriptionsOptions,
 ): ScanAndEnqueueStaleDescriptionsResult {
+  if (readSyncRuntimeMode(rootPath).mode === "sync-client") {
+    return { scanned: 0, enqueued: 0 }
+  }
+
   const configRepository = createAiConfigRepository(rootPath)
   if (!configRepository.exists()) {
     return { scanned: 0, enqueued: 0 }

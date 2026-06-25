@@ -4,6 +4,7 @@ import { enqueueDescribeNoteIfAiEnabled } from "./enqueue-describe-note.js";
 import { createNoteDescription } from "../domain/note-description.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
+import { readSyncRuntimeMode } from "../sync/runtime-mode.js";
 function isDescriptionStale(updatedAt, lastProcessedAt) {
     const updatedAtTime = Date.parse(updatedAt);
     const lastProcessedAtTime = Date.parse(lastProcessedAt ?? "");
@@ -25,6 +26,9 @@ function readOptionalSidecarByKey(sidecars, key) {
     }
 }
 export function scanAndEnqueueStaleDescriptions(rootPath, options) {
+    if (readSyncRuntimeMode(rootPath).mode === "sync-client") {
+        return { scanned: 0, enqueued: 0 };
+    }
     const configRepository = createAiConfigRepository(rootPath);
     if (!configRepository.exists()) {
         return { scanned: 0, enqueued: 0 };
