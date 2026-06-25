@@ -8,7 +8,7 @@ import { readStateManifest } from "../storage/state-manifest.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
 import { createFolderRepository } from "./folder-repository.js";
 import { createSyncClientService } from "./client-service.js";
-import { getNoteSyncEntityId } from "./mutation-tracking.js";
+import { ensureNoteSyncEntityIdForSyncSeed } from "./mutation-tracking.js";
 import { readSyncRuntimeMode, setSyncRuntimeMode } from "./runtime-mode.js";
 import { createSyncStatusRepository } from "./status-repository.js";
 import { repairSyncState } from "./repair.js";
@@ -125,7 +125,7 @@ export function linkCoreSync(options) {
     for (const note of notes) {
         dirtyRepository.markDirty({
             entityType: "note",
-            entityId: getNoteSyncEntityId(rootPath, note),
+            entityId: ensureNoteSyncEntityIdForSyncSeed(rootPath, note),
             dirtyType: "upsert",
             markedAt,
             metadata: { key: note.frontmatter.id, relativePath: note.sourcePath, title: note.frontmatter.title },

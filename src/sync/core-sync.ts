@@ -9,7 +9,7 @@ import { readStateManifest } from "../storage/state-manifest"
 import { createDirtyRecordRepository } from "./dirty-repository"
 import { createFolderRepository } from "./folder-repository"
 import { createSyncClientService } from "./client-service"
-import { getNoteSyncEntityId } from "./mutation-tracking"
+import { ensureNoteSyncEntityIdForSyncSeed } from "./mutation-tracking"
 import { readSyncRuntimeMode, setSyncRuntimeMode } from "./runtime-mode"
 import { createSyncStatusRepository } from "./status-repository"
 import { repairSyncState } from "./repair"
@@ -173,7 +173,7 @@ export function linkCoreSync(options: SyncLinkOptions & ResolveBlueNoteRootOptio
   for (const note of notes) {
     dirtyRepository.markDirty({
       entityType: "note",
-      entityId: getNoteSyncEntityId(rootPath, note),
+      entityId: ensureNoteSyncEntityIdForSyncSeed(rootPath, note),
       dirtyType: "upsert",
       markedAt,
       metadata: { key: note.frontmatter.id, relativePath: note.sourcePath, title: note.frontmatter.title },

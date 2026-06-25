@@ -56,6 +56,29 @@ export function getNoteSyncEntityId(rootPath, note) {
                 continue;
             }
             if (sidecar.key === note.frontmatter.id && path.normalize(sidecar.relativePath) === path.normalize(note.sourcePath)) {
+                return sidecar.noteId ?? storageIdentifier;
+            }
+        }
+    }
+    return note.frontmatter.id;
+}
+export function ensureNoteSyncEntityIdForSyncSeed(rootPath, note) {
+    const sidecars = createSidecarRepository(rootPath);
+    const notesDirectoryPath = path.join(rootPath, APP_STATE_NOTES_DIRECTORY);
+    if (existsSync(notesDirectoryPath)) {
+        for (const entry of readdirSync(notesDirectoryPath, { withFileTypes: true })) {
+            if (!entry.isFile() || !entry.name.endsWith(".json")) {
+                continue;
+            }
+            const storageIdentifier = path.basename(entry.name, ".json");
+            let sidecar;
+            try {
+                sidecar = sidecars.read(storageIdentifier);
+            }
+            catch {
+                continue;
+            }
+            if (sidecar.key === note.frontmatter.id && path.normalize(sidecar.relativePath) === path.normalize(note.sourcePath)) {
                 if (sidecar.noteId !== undefined) {
                     return sidecar.noteId;
                 }

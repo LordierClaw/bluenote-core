@@ -9,6 +9,23 @@ import { renameNote } from "../../../src/core/rename-note"
 import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import { enableSyncClientMode, listDirtyRecords } from "./sync-dirty-test-helpers"
 
+async function writeLegacyFrontmatterNote(rootPath: string, input: { key: string; title: string; relativePath: string; body: string }) {
+  const notePath = path.join(rootPath, input.relativePath)
+  await mkdir(path.dirname(notePath), { recursive: true })
+  await writeFile(notePath, [
+    "---",
+    `id: ${input.key}`,
+    "schemaVersion: 1",
+    `title: ${input.title}`,
+    "mode: plain",
+    "tags: []",
+    "createdAt: 2026-05-21T10:15:00.000Z",
+    "updatedAt: 2026-05-21T10:15:00.000Z",
+    "---",
+    input.body,
+  ].join("\n"), "utf8")
+}
+
 async function writePlainNoteWithSidecar(
   rootPath: string,
   {
@@ -328,6 +345,47 @@ test("renameNote marks the renamed note dirty in sync-client mode", async () => 
         },
       },
     ])
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+
+test("renameNote does not migrate sidecar-less legacy Markdown when title validation fails", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-rename-note-invalid-legacy-"))
+  const legacyRelativePath = "note/work/legacy.md"
+  const legacyPath = path.join(rootPath, legacyRelativePath)
+
+  try {
+    await writeLegacyFrontmatterNote(rootPath, {
+      key: "legacy",
+      title: "Legacy",
+      relativePath: legacyRelativePath,
+      body: "Legacy body.\n",
+    })
+    await writePlainNoteWithSidecar(rootPath, {
+      key: "duplicate-title-00000a",
+      title: "Duplicate Title",
+      description: "Duplicate description.",
+      relativePath: "note/work/duplicate-title-00000a.md",
+      body: "Duplicate body.\n",
+    })
+    const before = await readFile(legacyPath, "utf8")
+
+    assert.throws(
+      () => renameNote({
+        override: rootPath,
+        selector: "legacy",
+        title: "Duplicate Title",
+        body: "Renamed body.\n",
+        updatedAt: "2026-05-21T12:45:00.000Z",
+        randomSource: () => 10,
+      }),
+      UsageError,
+    )
+
+    assert.equal(await readFile(legacyPath, "utf8"), before)
+    await assert.rejects(() => access(path.join(rootPath, ".data", "notes", "legacy.json")))
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }

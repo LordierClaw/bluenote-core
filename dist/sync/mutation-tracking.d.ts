@@ -22,5 +22,6 @@ export interface SyncMutationInput {
     tombstones?: TombstoneInput[];
 }
 export declare function getNoteSyncEntityId(rootPath: string, note: Pick<ParsedNote, "frontmatter" | "sourcePath" | "body">): string;
+export declare function ensureNoteSyncEntityIdForSyncSeed(rootPath: string, note: Pick<ParsedNote, "frontmatter" | "sourcePath" | "body">): string;
 export declare function recordSyncMutationBestEffort(rootPath: string, input: SyncMutationInput): void;
 //# sourceMappingURL=mutation-tracking.d.ts.map
