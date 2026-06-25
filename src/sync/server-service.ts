@@ -70,6 +70,7 @@ interface AppliedChange {
 interface NoteMetadata {
   key: string
   title: string
+  description?: string
   relativePath: string
   createdAt: string
   updatedAt: string
@@ -113,6 +114,12 @@ function normalizeRelativePath(relativePath: string, rootPath: string): string {
   if (!isSyncNotePath || !portableRelativePath.endsWith(".md")) {
     throw new UsageError(`Invalid sync note relativePath '${relativePath}'.`, {
       hint: "Note sync pushes must target Markdown files under note/ or draft/.",
+    })
+  }
+
+  if (portableRelativePath.startsWith("draft/") && path.posix.dirname(portableRelativePath) !== "draft") {
+    throw new UsageError(`Invalid sync note relativePath '${relativePath}'.`, {
+      hint: "Draft note sync paths must be direct children of draft/.",
     })
   }
 
@@ -219,6 +226,7 @@ function noteMetadataFromPush(rootPath: string, record: SyncPushRecord): NoteMet
   )
   const key = stringMetadata(metadata, "key") ?? basenameKeyFromRelativePath(relativePath)
   const title = stringMetadata(metadata, "title") ?? key
+  const description = stringMetadata(metadata, "description") ?? undefined
   const updatedAt = stringMetadata(metadata, "updatedAt") ?? record.clientUpdatedAt
   const createdAt = stringMetadata(metadata, "createdAt") ?? updatedAt
   const contentHash = record.bodyUpload?.contentHash ?? stringMetadata(metadata, "contentHash") ?? undefined
@@ -230,7 +238,7 @@ function noteMetadataFromPush(rootPath: string, record: SyncPushRecord): NoteMet
     })
   }
 
-  return { key, title, relativePath, createdAt, updatedAt, contentHash, byteLength }
+  return { key, title, description, relativePath, createdAt, updatedAt, contentHash, byteLength }
 }
 
 function ensureSyncNoteFolder(rootPath: string, relativePath: string): void {
@@ -363,8 +371,12 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Mut
         },
         destination: createDestinationForRelativePath(metadata.relativePath),
       })
-      if (ai !== undefined) {
-        sidecars.write({ ...sidecars.readByNoteId(record.entityId), ai })
+      if (metadata.description !== undefined || ai !== undefined) {
+        sidecars.write({
+          ...sidecars.readByNoteId(record.entityId),
+          ...(metadata.description === undefined ? {} : { description: metadata.description }),
+          ...(ai === undefined ? {} : { ai }),
+        })
       }
     } else {
       if (sidecar.relativePath !== metadata.relativePath || sidecar.key !== metadata.key) {
@@ -384,7 +396,7 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Mut
           type: noteTypeForRelativePath(metadata.relativePath),
           key: metadata.key,
           title: metadata.title,
-          description: createNoteDescription(body),
+          description: metadata.description ?? createNoteDescription(body),
           relativePath: metadata.relativePath,
           updatedAt: metadata.updatedAt,
           ...(ai === undefined ? {} : { ai }),
@@ -395,8 +407,12 @@ function upsertNote(rootPath: string, record: SyncPushRecord, body: string): Mut
           body,
           updatedAt: metadata.updatedAt,
         })
-        if (ai !== undefined) {
-          sidecars.write({ ...sidecars.readByNoteId(record.entityId), ai })
+        if (metadata.description !== undefined || ai !== undefined) {
+          sidecars.write({
+            ...sidecars.readByNoteId(record.entityId),
+            ...(metadata.description === undefined ? {} : { description: metadata.description }),
+            ...(ai === undefined ? {} : { ai }),
+          })
         }
       }
     }
@@ -668,6 +684,7 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
                 const metadata = mutation.value
                 const changeMetadata = metadataWithoutBody({
                   ...record.metadata,
+                  ...(metadata.description === undefined ? {} : { description: metadata.description }),
                   ...(metadata.contentHash === undefined ? {} : { contentHash: metadata.contentHash }),
                   ...(metadata.byteLength === undefined ? {} : { byteLength: metadata.byteLength }),
                 })

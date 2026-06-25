@@ -59,6 +59,7 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
           metadata: {
             key: "client-note",
             title: "Client Note",
+            description: "Generated client description.",
             relativePath: "note/client-note.md",
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -81,7 +82,7 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
       noteId: "note-1",
       key: "client-note",
       title: "Client Note",
-      description: "# Body Hello from a client.",
+      description: "Generated client description.",
       relativePath: "note/client-note.md",
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -112,6 +113,7 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
         metadata: {
           key: "client-note",
           title: "Client Note",
+          description: "Generated client description.",
           relativePath: "note/client-note.md",
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
@@ -134,6 +136,40 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
     })
     assert.throws(() => server.downloadNoteBody("note-1", { workspaceId: "other-workspace" }), /workspaceId mismatch/)
     assert.throws(() => server.downloadNoteBody("note-1"), /workspaceId mismatch/)
+  })
+})
+
+
+
+test("server rejects nested draft note sync paths", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "draft-nested": "Nested draft body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "draft-nested",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "bar",
+          title: "Nested Draft",
+          relativePath: "draft/foo/bar.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }],
+    })
+
+    assert.equal(response.accepted.length, 0)
+    assert.equal(response.rejected.length, 1)
+    assert.match(response.rejected[0].message, /Invalid sync note relativePath 'draft\/foo\/bar\.md'/)
+    assert.equal(existsSync(path.join(rootPath, "draft", "bar.md")), false)
+    assert.equal(existsSync(path.join(rootPath, "draft", "foo", "bar.md")), false)
   })
 })
 

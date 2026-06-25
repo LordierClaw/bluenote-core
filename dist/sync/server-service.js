@@ -33,6 +33,11 @@ function normalizeRelativePath(relativePath, rootPath) {
             hint: "Note sync pushes must target Markdown files under note/ or draft/.",
         });
     }
+    if (portableRelativePath.startsWith("draft/") && path.posix.dirname(portableRelativePath) !== "draft") {
+        throw new UsageError(`Invalid sync note relativePath '${relativePath}'.`, {
+            hint: "Draft note sync paths must be direct children of draft/.",
+        });
+    }
     const absolutePath = assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath));
     const allowedRoot = portableRelativePath.startsWith("draft/") ? getDraftNotesPath(rootPath) : getNormalNotesPath(rootPath);
     assertPathInsideRoot(allowedRoot, absolutePath);
@@ -126,6 +131,7 @@ function noteMetadataFromPush(rootPath, record) {
     const relativePath = normalizeRelativePath(stringMetadata(metadata, "relativePath") ?? `note/${record.entityId}.md`, rootPath);
     const key = stringMetadata(metadata, "key") ?? basenameKeyFromRelativePath(relativePath);
     const title = stringMetadata(metadata, "title") ?? key;
+    const description = stringMetadata(metadata, "description") ?? undefined;
     const updatedAt = stringMetadata(metadata, "updatedAt") ?? record.clientUpdatedAt;
     const createdAt = stringMetadata(metadata, "createdAt") ?? updatedAt;
     const contentHash = record.bodyUpload?.contentHash ?? stringMetadata(metadata, "contentHash") ?? undefined;
@@ -135,7 +141,7 @@ function noteMetadataFromPush(rootPath, record) {
             hint: "The note key must match the Markdown filename basename.",
         });
     }
-    return { key, title, relativePath, createdAt, updatedAt, contentHash, byteLength };
+    return { key, title, description, relativePath, createdAt, updatedAt, contentHash, byteLength };
 }
 function ensureSyncNoteFolder(rootPath, relativePath) {
     if (relativePath.startsWith("draft/")) {
@@ -254,8 +260,12 @@ function upsertNote(rootPath, record, body) {
                 },
                 destination: createDestinationForRelativePath(metadata.relativePath),
             });
-            if (ai !== undefined) {
-                sidecars.write({ ...sidecars.readByNoteId(record.entityId), ai });
+            if (metadata.description !== undefined || ai !== undefined) {
+                sidecars.write({
+                    ...sidecars.readByNoteId(record.entityId),
+                    ...(metadata.description === undefined ? {} : { description: metadata.description }),
+                    ...(ai === undefined ? {} : { ai }),
+                });
             }
         }
         else {
@@ -276,7 +286,7 @@ function upsertNote(rootPath, record, body) {
                     type: noteTypeForRelativePath(metadata.relativePath),
                     key: metadata.key,
                     title: metadata.title,
-                    description: createNoteDescription(body),
+                    description: metadata.description ?? createNoteDescription(body),
                     relativePath: metadata.relativePath,
                     updatedAt: metadata.updatedAt,
                     ...(ai === undefined ? {} : { ai }),
@@ -288,8 +298,12 @@ function upsertNote(rootPath, record, body) {
                     body,
                     updatedAt: metadata.updatedAt,
                 });
-                if (ai !== undefined) {
-                    sidecars.write({ ...sidecars.readByNoteId(record.entityId), ai });
+                if (metadata.description !== undefined || ai !== undefined) {
+                    sidecars.write({
+                        ...sidecars.readByNoteId(record.entityId),
+                        ...(metadata.description === undefined ? {} : { description: metadata.description }),
+                        ...(ai === undefined ? {} : { ai }),
+                    });
                 }
             }
         }
@@ -526,6 +540,7 @@ export function createSyncServerService(options) {
                                     const metadata = mutation.value;
                                     const changeMetadata = metadataWithoutBody({
                                         ...record.metadata,
+                                        ...(metadata.description === undefined ? {} : { description: metadata.description }),
                                         ...(metadata.contentHash === undefined ? {} : { contentHash: metadata.contentHash }),
                                         ...(metadata.byteLength === undefined ? {} : { byteLength: metadata.byteLength }),
                                     });

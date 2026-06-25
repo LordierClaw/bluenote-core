@@ -93,6 +93,8 @@ describe("sync client service", () => {
         noteIdGenerator: () => "note-local-dirty",
       })
       const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      const sidecars = createSidecarRepository(rootPath)
+      sidecars.write({ ...sidecars.readByNoteId(note.noteId), description: "Generated local description." })
       for (const record of dirty.listDirtyRecords()) {
         dirty.clearDirtyRecord(record.entityType, record.entityId)
       }
@@ -111,6 +113,7 @@ describe("sync client service", () => {
       assert.equal(transport.pushes.length, 1)
       assert.equal(transport.pushes[0].records.length, 1)
       assert.equal(transport.pushes[0].records[0].entityId, note.noteId)
+      assert.equal(transport.pushes[0].records[0].metadata.description, "Generated local description.")
       assert.equal(transport.pushes[0].noteBodies?.[note.noteId], "Local dirty body.\n")
       assert.deepEqual(summary, { status: "synced", pushed: 1, pulled: 0 })
       assert.deepEqual(dirty.listDirtyRecords(), [])
@@ -374,6 +377,7 @@ describe("sync client service", () => {
             metadata: {
               key: "remote-draft",
               relativePath: "draft/remote-draft.md",
+              description: "Generated remote draft description.",
               title: "Remote Draft",
               createdAt: "2026-06-24T01:00:00.000Z",
               updatedAt: "2026-06-24T01:00:00.000Z",
@@ -389,7 +393,7 @@ describe("sync client service", () => {
         noteId: "draft-remote",
         key: "remote-draft",
         title: "Remote Draft",
-        description: "Remote draft body.",
+        description: "Generated remote draft description.",
         relativePath: "draft/remote-draft.md",
         createdAt: "2026-06-24T01:00:00.000Z",
         updatedAt: "2026-06-24T01:00:00.000Z",

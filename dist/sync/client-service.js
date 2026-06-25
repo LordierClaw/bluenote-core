@@ -36,6 +36,11 @@ function normalizeNoteRelativePath(rootPath, relativePath) {
     if (!isSyncNotePath || !portableRelativePath.endsWith(".md")) {
         throw new Error(`Invalid pulled note relativePath '${relativePath}'.`);
     }
+    if (portableRelativePath.startsWith("draft/") && path.posix.dirname(portableRelativePath) !== "draft") {
+        throw new UsageError(`Invalid pulled note relativePath '${relativePath}'.`, {
+            hint: "Draft note sync paths must be direct children of draft/.",
+        });
+    }
     const normalizedRelativePath = toRootRelativePath(rootPath, assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath)));
     const isNormalizedSyncNotePath = normalizedRelativePath.startsWith("note/") || normalizedRelativePath.startsWith("draft/");
     if (!isNormalizedSyncNotePath || !normalizedRelativePath.endsWith(".md")) {
@@ -181,6 +186,7 @@ function applyPulledNoteUpsert(rootPath, change, body) {
     assertMetadataKeyMatchesRelativePath(key, relativePath);
     assertPulledNotePathAvailable(rootPath, relativePath, change.entityId);
     const title = metadataString(change.metadata, "title") ?? change.title ?? key;
+    const description = metadataString(change.metadata, "description") ?? createNoteDescription(body);
     const updatedAt = metadataString(change.metadata, "updatedAt") ?? change.changedAt;
     const createdAt = metadataString(change.metadata, "createdAt") ?? updatedAt;
     const ai = metadataObject(change.metadata, "ai");
@@ -203,8 +209,12 @@ function applyPulledNoteUpsert(rootPath, change, body) {
                 },
                 destination: destinationForPulledNote(relativePath),
             });
-            if (ai !== undefined) {
-                sidecars.write({ ...sidecars.readByNoteId(change.entityId), ai });
+            if (description !== createNoteDescription(body) || ai !== undefined) {
+                sidecars.write({
+                    ...sidecars.readByNoteId(change.entityId),
+                    ...(description === createNoteDescription(body) ? {} : { description }),
+                    ...(ai === undefined ? {} : { ai }),
+                });
             }
         }
         catch (error) {
@@ -218,8 +228,12 @@ function applyPulledNoteUpsert(rootPath, change, body) {
         const snapshots = [snapshotFile(existingPath), snapshotFile(sidecars.getSidecarPathByNoteId(change.entityId))];
         try {
             notes.syncEditedNote(existingPath, { title, body, updatedAt });
-            if (ai !== undefined) {
-                sidecars.write({ ...sidecars.readByNoteId(change.entityId), ai });
+            if (description !== createNoteDescription(body) || ai !== undefined) {
+                sidecars.write({
+                    ...sidecars.readByNoteId(change.entityId),
+                    ...(description === createNoteDescription(body) ? {} : { description }),
+                    ...(ai === undefined ? {} : { ai }),
+                });
             }
         }
         catch (error) {
@@ -242,7 +256,7 @@ function applyPulledNoteUpsert(rootPath, change, body) {
             type: noteTypeForRelativePath(relativePath),
             key,
             title,
-            description: createNoteDescription(body),
+            description,
             relativePath,
             updatedAt,
             ...(ai === undefined ? {} : { ai }),
@@ -362,6 +376,7 @@ function buildPushRequest(rootPath, workspaceId, replicaId, baseSequence, record
                         key: sidecar.key,
                         title: sidecar.title,
                         relativePath: sidecar.relativePath,
+                        description: sidecar.description,
                         createdAt: sidecar.createdAt,
                         updatedAt: sidecar.updatedAt,
                         ...(sidecar.ai === undefined ? {} : { ai: sidecar.ai }),
