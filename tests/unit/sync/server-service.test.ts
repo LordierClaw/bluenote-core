@@ -126,12 +126,58 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
     assert.deepEqual(server.downloadNoteBody("note-1", { workspaceId }), {
       workspaceId,
       noteId: "note-1",
+      sequence: 1,
+      serverRevision: 1,
       body: "# Body\n\nHello from a client.\n",
       contentHash: "sha256:client-body",
       byteLength: 29,
     })
     assert.throws(() => server.downloadNoteBody("note-1", { workspaceId: "other-workspace" }), /workspaceId mismatch/)
     assert.throws(() => server.downloadNoteBody("note-1"), /workspaceId mismatch/)
+  })
+})
+
+test("server binds body downloads to the requested revision", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    const first = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-race": "First body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-race",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: { key: "race-note", title: "Race Note", relativePath: "note/race-note.md", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+        bodyUpload: { contentHash: "sha256:first", byteLength: 12 },
+      }],
+    })
+    const pulled = server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 }).changes[0]
+    assert.equal(pulled.serverRevision, first.accepted[0].serverRevision)
+
+    const second = server.acceptPush({
+      workspaceId,
+      replicaId: "client-b",
+      baseSequence: first.serverSequence,
+      noteBodies: { "note-race": "Second body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-race",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+        metadata: { key: "race-note", title: "Race Note", relativePath: "note/race-note.md", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:01:00.000Z" },
+        bodyUpload: { contentHash: "sha256:second", byteLength: 13 },
+      }],
+    })
+    assert.equal(second.accepted[0].serverRevision, first.accepted[0].serverRevision + 1)
+
+    assert.throws(() => server.downloadNoteBody("note-race", {
+      workspaceId,
+      sequence: pulled.sequence,
+      serverRevision: pulled.serverRevision,
+    }), /revision/i)
   })
 })
 

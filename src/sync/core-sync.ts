@@ -28,7 +28,7 @@ import type {
 export interface SyncTransport {
   pull(request: PullChangesRequest): PullChangesResponse
   push(request: PushRequest & { noteBodies?: Record<string, string> }): PushResponse
-  downloadNoteBody(noteId: string): DownloadNoteBodyResponse
+  downloadNoteBody(noteId: string, request?: { workspaceId?: string; sequence?: number; serverRevision?: number }): DownloadNoteBodyResponse
 }
 
 export type {

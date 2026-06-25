@@ -574,6 +574,45 @@ test("repository rename preserves noteId-keyed sidecar path", async () => {
   }
 })
 
+test("repository rename rejects keys that collide with noteId sidecar filenames", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-rename-noteid-collision-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
+    const first = repository.create({
+      noteId: "note_collision_target",
+      frontmatter: { ...FIXED_FRONTMATTER, id: "first-note", title: "First Note" },
+      body: "First body.\n",
+      destination: { type: "normal", folderRelativePath: "note/work" },
+    })
+    const second = repository.create({
+      noteId: "note_other",
+      frontmatter: { ...FIXED_FRONTMATTER, id: "second-note", title: "Second Note" },
+      body: "Second body.\n",
+      destination: { type: "normal", folderRelativePath: "note/work" },
+    })
+
+    assert.throws(
+      () => repository.rename(second.notePath, {
+        nextKey: "note_collision_target",
+        title: "Collision Target",
+        body: "Renamed body.\n",
+        updatedAt: "2026-06-07T10:00:00.000Z",
+      }),
+      (error) => {
+        assert.ok(error instanceof UsageError)
+        assert.match(error.hint ?? "", /already exists/i)
+        return true
+      },
+    )
+    assert.equal(repository.read(first.notePath).frontmatter.id, "first-note")
+    assert.equal(repository.read(second.notePath).frontmatter.id, "second-note")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("repository rename restores noteId-keyed sidecar when removing the old note fails", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-note-id-rename-rollback-"))
 

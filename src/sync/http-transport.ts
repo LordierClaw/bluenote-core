@@ -33,7 +33,7 @@ export interface SyncHttpTransport {
   pull(request: PullChangesRequest): Promise<PullChangesResponse>
   push(request: PushRequest & { noteBodies?: Record<string, string> }): Promise<PushResponse>
   uploadNoteBody(request: UploadNoteBodyRequest): Promise<UploadNoteBodyResponse>
-  downloadNoteBody(noteId: string, options?: { workspaceId?: string }): Promise<DownloadNoteBodyResponse>
+  downloadNoteBody(noteId: string, options?: { workspaceId?: string; sequence?: number; serverRevision?: number }): Promise<DownloadNoteBodyResponse>
   status(options?: { workspaceId?: string }): Promise<Record<string, unknown>>
   getStatus(options?: { workspaceId?: string }): Promise<Record<string, unknown>>
 }
@@ -45,7 +45,7 @@ export interface SyncHttpService {
   getChanges(request: PullChangesRequest): PullChangesResponse | Promise<PullChangesResponse>
   acceptPush(request: PushRequest & { noteBodies?: Record<string, string> }): PushResponse | Promise<PushResponse>
   uploadNoteBody?(request: UploadNoteBodyRequest): UploadNoteBodyResponse | Promise<UploadNoteBodyResponse>
-  downloadNoteBody(noteId: string, request?: { workspaceId?: string }): DownloadNoteBodyResponse | Promise<DownloadNoteBodyResponse>
+  downloadNoteBody(noteId: string, request?: { workspaceId?: string; sequence?: number; serverRevision?: number }): DownloadNoteBodyResponse | Promise<DownloadNoteBodyResponse>
   status?(request?: { workspaceId?: string }): Record<string, unknown> | SyncStatusView | Promise<Record<string, unknown> | SyncStatusView>
 }
 
@@ -195,11 +195,14 @@ function jsonPostInit(body: unknown): RequestInit {
   return { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
 }
 
-function endpointWithWorkspace(endpoint: string, options?: { workspaceId?: string }): string {
-  if (options?.workspaceId === undefined) {
+function endpointWithWorkspace(endpoint: string, options?: { workspaceId?: string; sequence?: number; serverRevision?: number }): string {
+  if (options?.workspaceId === undefined && options?.sequence === undefined && options?.serverRevision === undefined) {
     return endpoint
   }
-  const query = new URLSearchParams({ workspaceId: options.workspaceId })
+  const query = new URLSearchParams()
+  if (options?.workspaceId !== undefined) query.set("workspaceId", options.workspaceId)
+  if (options?.sequence !== undefined) query.set("sequence", String(options.sequence))
+  if (options?.serverRevision !== undefined) query.set("serverRevision", String(options.serverRevision))
   return `${endpoint}?${query.toString()}`
 }
 
@@ -255,13 +258,30 @@ function normalizePath(path: string): string {
   return pathOnly.replace(/\/+$/, "") || "/"
 }
 
-function workspaceFromPath(path: string): { workspaceId?: string } | undefined {
+function optionalNonNegativeIntegerQuery(query: URLSearchParams, key: string): number | undefined {
+  const raw = query.get(key)
+  if (raw === null) {
+    return undefined
+  }
+  const value = Number(raw)
+  return Number.isInteger(value) && value >= 0 ? value : Number.NaN
+}
+
+function workspaceFromPath(path: string): { workspaceId?: string; sequence?: number; serverRevision?: number } | undefined {
   const queryStart = path.indexOf("?")
   if (queryStart === -1) {
     return undefined
   }
-  const workspaceId = new URLSearchParams(path.slice(queryStart + 1)).get("workspaceId") ?? undefined
-  return workspaceId === undefined ? undefined : { workspaceId }
+  const query = new URLSearchParams(path.slice(queryStart + 1))
+  const workspaceId = query.get("workspaceId") ?? undefined
+  const sequence = optionalNonNegativeIntegerQuery(query, "sequence")
+  const serverRevision = optionalNonNegativeIntegerQuery(query, "serverRevision")
+  const parsed = {
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+    ...(sequence === undefined ? {} : { sequence }),
+    ...(serverRevision === undefined ? {} : { serverRevision }),
+  }
+  return Object.keys(parsed).length === 0 ? undefined : parsed
 }
 
 function noteIdFromBodyPath(path: string): string | null {

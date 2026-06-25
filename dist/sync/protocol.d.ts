@@ -79,6 +79,8 @@ export interface UploadNoteBodyResponse {
 export interface DownloadNoteBodyResponse {
     workspaceId: string;
     noteId: string;
+    sequence?: number;
+    serverRevision?: number;
     contentHash?: string;
     byteLength?: number;
     body: string;

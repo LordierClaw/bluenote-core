@@ -15,6 +15,8 @@ export interface SyncHttpTransport {
     uploadNoteBody(request: UploadNoteBodyRequest): Promise<UploadNoteBodyResponse>;
     downloadNoteBody(noteId: string, options?: {
         workspaceId?: string;
+        sequence?: number;
+        serverRevision?: number;
     }): Promise<DownloadNoteBodyResponse>;
     status(options?: {
         workspaceId?: string;
@@ -33,6 +35,8 @@ export interface SyncHttpService {
     uploadNoteBody?(request: UploadNoteBodyRequest): UploadNoteBodyResponse | Promise<UploadNoteBodyResponse>;
     downloadNoteBody(noteId: string, request?: {
         workspaceId?: string;
+        sequence?: number;
+        serverRevision?: number;
     }): DownloadNoteBodyResponse | Promise<DownloadNoteBodyResponse>;
     status?(request?: {
         workspaceId?: string;

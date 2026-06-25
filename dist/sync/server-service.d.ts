@@ -17,6 +17,8 @@ export interface SyncServerService {
     getChanges(request: PullChangesRequest): PullChangesResponse;
     downloadNoteBody(noteId: string, request?: {
         workspaceId?: string;
+        sequence?: number;
+        serverRevision?: number;
     }): DownloadNoteBodyResponse;
 }
 export declare function createSyncServerService(options: CreateSyncServerServiceOptions): SyncServerService;

@@ -91,6 +91,8 @@ export interface UploadNoteBodyResponse {
 export interface DownloadNoteBodyResponse {
   workspaceId: string
   noteId: string
+  sequence?: number
+  serverRevision?: number
   contentHash?: string
   byteLength?: number
   body: string
@@ -310,6 +312,8 @@ export function isDownloadNoteBodyResponse(value: unknown): value is DownloadNot
     isObject(value) &&
     isString(value.workspaceId) &&
     isString(value.noteId) &&
+    (!hasOwn(value, "sequence") || isNonNegativeInteger(value.sequence)) &&
+    (!hasOwn(value, "serverRevision") || isNonNegativeInteger(value.serverRevision)) &&
     optionalString(value, "contentHash") &&
     (!hasOwn(value, "byteLength") || isNonNegativeInteger(value.byteLength)) &&
     isString(value.body)

@@ -148,6 +148,8 @@ export function isDownloadNoteBodyResponse(value) {
     return (isObject(value) &&
         isString(value.workspaceId) &&
         isString(value.noteId) &&
+        (!hasOwn(value, "sequence") || isNonNegativeInteger(value.sequence)) &&
+        (!hasOwn(value, "serverRevision") || isNonNegativeInteger(value.serverRevision)) &&
         optionalString(value, "contentHash") &&
         (!hasOwn(value, "byteLength") || isNonNegativeInteger(value.byteLength)) &&
         isString(value.body));

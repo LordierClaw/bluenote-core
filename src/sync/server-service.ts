@@ -51,7 +51,7 @@ export interface SyncServerPushRequest extends PushRequest {
 export interface SyncServerService {
   acceptPush(request: SyncServerPushRequest): PushResponse
   getChanges(request: PullChangesRequest): PullChangesResponse
-  downloadNoteBody(noteId: string, request?: { workspaceId?: string }): DownloadNoteBodyResponse
+  downloadNoteBody(noteId: string, request?: { workspaceId?: string; sequence?: number; serverRevision?: number }): DownloadNoteBodyResponse
 }
 
 interface AppliedChange {
@@ -819,7 +819,7 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
       const body = createNoteRepository(rootPath).read(notePath).body
       const metadataRows = withSyncDatabase(rootPath, dbIdentity, (handle) => handle.db.exec(
         `
-          SELECT metadataJson
+          SELECT sequence, serverRevision, metadataJson
           FROM server_changes
           WHERE workspaceId = ? AND entityType = 'note' AND entityId = ? AND changeType = 'upsert'
           ORDER BY sequence DESC
@@ -827,13 +827,32 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
         `,
         [options.workspaceId, noteId],
       )[0]?.values ?? [])
-      const metadata = parseSyncMetadata(typeof metadataRows[0]?.[0] === "string" ? metadataRows[0][0] : null) ?? {}
+      const latest = metadataRows[0]
+      const latestSequence = typeof latest?.[0] === "number" ? latest[0] : undefined
+      const latestRevision = typeof latest?.[1] === "number" ? latest[1] : undefined
+
+      if (!Number.isInteger(request?.sequence ?? 0) || !Number.isInteger(request?.serverRevision ?? 0)) {
+        throw new UsageError(`Invalid sync body download revision for note '${noteId}'.`)
+      }
+      if (
+        request?.sequence !== undefined &&
+        request?.serverRevision !== undefined &&
+        (request.sequence !== latestSequence || request.serverRevision !== latestRevision)
+      ) {
+        throw new UsageError(`Requested body revision for note '${noteId}' is no longer current.`, {
+          hint: "Pull the latest sync changes and retry the body download for the returned sequence/revision.",
+        })
+      }
+
+      const metadata = parseSyncMetadata(typeof latest?.[2] === "string" ? latest[2] : null) ?? {}
       const contentHash = stringMetadata(metadata, "contentHash") ?? stringMetadata(metadata, "hash") ?? undefined
       const byteLength = numberMetadata(metadata, "byteLength") ?? undefined
 
       return {
         workspaceId: options.workspaceId,
         noteId,
+        ...(latestSequence === undefined ? {} : { sequence: latestSequence }),
+        ...(latestRevision === undefined ? {} : { serverRevision: latestRevision }),
         ...(contentHash === undefined ? {} : { contentHash }),
         ...(byteLength === undefined ? {} : { byteLength }),
         body,

@@ -234,14 +234,17 @@ function noteKeyExists(rootPath: string, key: string): boolean {
   }
 
   for (const sidecarStorageKey of listSidecarKeys(rootPath)) {
+    if (sidecarStorageKey === key) {
+      return true
+    }
+
     try {
       if (sidecars.read(sidecarStorageKey).key === key) {
         return true
       }
     } catch {
-      if (sidecarStorageKey === key) {
-        return true
-      }
+      // Malformed unrelated sidecars do not prove this parsed key exists unless
+      // their filename already matched above.
     }
   }
 

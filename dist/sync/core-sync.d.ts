@@ -6,7 +6,11 @@ export interface SyncTransport {
     push(request: PushRequest & {
         noteBodies?: Record<string, string>;
     }): PushResponse;
-    downloadNoteBody(noteId: string): DownloadNoteBodyResponse;
+    downloadNoteBody(noteId: string, request?: {
+        workspaceId?: string;
+        sequence?: number;
+        serverRevision?: number;
+    }): DownloadNoteBodyResponse;
 }
 export type { SyncLinkOptions, SyncLinkSummary, SyncNowOptions, SyncNowSummary, SyncRepairOptions, SyncRepairSummary, SyncStatusView, SyncUnlinkSummary, } from "./types.js";
 export declare function getCoreSyncStatus(options?: ResolveBlueNoteRootOptions): SyncStatusView;

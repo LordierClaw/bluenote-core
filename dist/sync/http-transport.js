@@ -108,10 +108,16 @@ function jsonPostInit(body) {
     return { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
 function endpointWithWorkspace(endpoint, options) {
-    if (options?.workspaceId === undefined) {
+    if (options?.workspaceId === undefined && options?.sequence === undefined && options?.serverRevision === undefined) {
         return endpoint;
     }
-    const query = new URLSearchParams({ workspaceId: options.workspaceId });
+    const query = new URLSearchParams();
+    if (options?.workspaceId !== undefined)
+        query.set("workspaceId", options.workspaceId);
+    if (options?.sequence !== undefined)
+        query.set("sequence", String(options.sequence));
+    if (options?.serverRevision !== undefined)
+        query.set("serverRevision", String(options.serverRevision));
     return `${endpoint}?${query.toString()}`;
 }
 export function createSyncHttpTransport(options) {
@@ -160,13 +166,29 @@ function normalizePath(path) {
     const [pathOnly] = path.split("?", 1);
     return pathOnly.replace(/\/+$/, "") || "/";
 }
+function optionalNonNegativeIntegerQuery(query, key) {
+    const raw = query.get(key);
+    if (raw === null) {
+        return undefined;
+    }
+    const value = Number(raw);
+    return Number.isInteger(value) && value >= 0 ? value : Number.NaN;
+}
 function workspaceFromPath(path) {
     const queryStart = path.indexOf("?");
     if (queryStart === -1) {
         return undefined;
     }
-    const workspaceId = new URLSearchParams(path.slice(queryStart + 1)).get("workspaceId") ?? undefined;
-    return workspaceId === undefined ? undefined : { workspaceId };
+    const query = new URLSearchParams(path.slice(queryStart + 1));
+    const workspaceId = query.get("workspaceId") ?? undefined;
+    const sequence = optionalNonNegativeIntegerQuery(query, "sequence");
+    const serverRevision = optionalNonNegativeIntegerQuery(query, "serverRevision");
+    const parsed = {
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+        ...(sequence === undefined ? {} : { sequence }),
+        ...(serverRevision === undefined ? {} : { serverRevision }),
+    };
+    return Object.keys(parsed).length === 0 ? undefined : parsed;
 }
 function noteIdFromBodyPath(path) {
     const prefix = "/sync/v1/bodies/";

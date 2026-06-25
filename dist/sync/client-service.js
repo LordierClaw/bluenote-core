@@ -307,7 +307,11 @@ function applyPulledChange(rootPath, identity, change, transport) {
             hint: "Note upsert changes must provide a downloadable body before local content can be replaced.",
         });
     }
-    const body = transport.downloadNoteBody(change.entityId).body;
+    const body = transport.downloadNoteBody(change.entityId, {
+        workspaceId: identity.workspaceId,
+        sequence: change.sequence,
+        serverRevision: change.serverRevision,
+    }).body;
     applyPulledNoteUpsert(rootPath, change, body);
     return true;
 }
