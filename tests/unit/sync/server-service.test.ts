@@ -2,6 +2,7 @@ import { test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
+import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
@@ -14,6 +15,13 @@ import { createFolderRepository, createSidecarRepository, createTombstoneReposit
 const workspaceId = "workspace-server"
 const dbIdentity = { role: "server" as const, workspaceId }
 const SQL = await initSqlJs()
+
+function uploadDescriptor(body: string): { contentHash: string; byteLength: number } {
+  return {
+    contentHash: `sha256:${createHash("sha256").update(body, "utf8").digest("hex")}`,
+    byteLength: Buffer.byteLength(body, "utf8"),
+  }
+}
 
 async function withRoot<T>(callback: (rootPath: string) => T | Promise<T>): Promise<T> {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-server-service-"))
@@ -64,10 +72,7 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
-          bodyUpload: {
-            contentHash: "sha256:client-body",
-            byteLength: 29,
-          },
+          bodyUpload: uploadDescriptor("# Body\n\nHello from a client.\n"),
         },
       ],
     })
@@ -117,7 +122,7 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
           relativePath: "note/client-note.md",
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
-          contentHash: "sha256:client-body",
+          contentHash: "sha256:b56f483f71de09749c10ffe85a191e0241dc07c50cc197006448c7f27995bbb3",
           byteLength: 29,
         },
       },
@@ -131,7 +136,7 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
       sequence: 1,
       serverRevision: 1,
       body: "# Body\n\nHello from a client.\n",
-      contentHash: "sha256:client-body",
+      contentHash: "sha256:b56f483f71de09749c10ffe85a191e0241dc07c50cc197006448c7f27995bbb3",
       byteLength: 29,
     })
     assert.throws(() => server.downloadNoteBody("note-1", { workspaceId: "other-workspace" }), /workspaceId mismatch/)
@@ -141,7 +146,7 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
       sequence: 1,
       serverRevision: 1,
       body: "# Body\n\nHello from a client.\n",
-      contentHash: "sha256:client-body",
+      contentHash: "sha256:b56f483f71de09749c10ffe85a191e0241dc07c50cc197006448c7f27995bbb3",
       byteLength: 29,
     })
   })
@@ -149,6 +154,40 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
 
 
 
+
+
+test("server rejects pushed note body descriptors that do not match uploaded bytes", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-bad-descriptor": "Actual body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-bad-descriptor",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "bad-descriptor",
+          title: "Bad Descriptor",
+          relativePath: "note/bad-descriptor.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        bodyUpload: { contentHash: "sha256:incorrect", byteLength: 999 },
+      }],
+    })
+
+    assert.deepEqual(response.accepted, [])
+    assert.equal(response.rejected.length, 1)
+    assert.match(response.rejected[0].message, /Invalid sync body descriptor/)
+    assert.equal(existsSync(path.join(rootPath, "note", "bad-descriptor.md")), false)
+    assert.equal(readServerChanges(rootPath).length, 0)
+  })
+})
 
 
 test("server rejects synced note relocation to a key owned by another note", async () => {
@@ -174,7 +213,6 @@ test("server rejects synced note relocation to a key owned by another note", asy
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         },
-        bodyUpload: { contentHash: "sha256:alpha", byteLength: 12 },
       }, {
         entityType: "note",
         entityId: "note-b",
@@ -187,7 +225,6 @@ test("server rejects synced note relocation to a key owned by another note", asy
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         },
-        bodyUpload: { contentHash: "sha256:beta", byteLength: 11 },
       }],
     })
     assert.equal(initial.rejected.length, 0)
@@ -209,7 +246,6 @@ test("server rejects synced note relocation to a key owned by another note", asy
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:01:00.000Z",
         },
-        bodyUpload: { contentHash: "sha256:alpha-moved", byteLength: 18 },
       }],
     })
 
@@ -422,7 +458,6 @@ test("server binds body downloads to the requested revision", async () => {
         dirtyType: "upsert",
         clientUpdatedAt: "2026-01-01T00:00:00.000Z",
         metadata: { key: "race-note", title: "Race Note", relativePath: "note/race-note.md", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
-        bodyUpload: { contentHash: "sha256:first", byteLength: 12 },
       }],
     })
     const pulled = server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 }).changes[0]
@@ -439,7 +474,6 @@ test("server binds body downloads to the requested revision", async () => {
         dirtyType: "upsert",
         clientUpdatedAt: "2026-01-01T00:01:00.000Z",
         metadata: { key: "race-note", title: "Race Note", relativePath: "note/race-note.md", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:01:00.000Z" },
-        bodyUpload: { contentHash: "sha256:second", byteLength: 13 },
       }],
     })
     assert.equal(second.accepted[0].serverRevision, first.accepted[0].serverRevision + 1)
@@ -535,7 +569,6 @@ test("server accepts synced draft note upserts", async () => {
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
-          bodyUpload: { contentHash: "sha256:draft", byteLength: 12 },
         },
       ],
     })
@@ -885,7 +918,6 @@ test("server allocates in-batch revisions transactionally for repeated entity ch
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
-          bodyUpload: { contentHash: "sha256:dup-1", byteLength: 35 },
         },
         {
           entityType: "note",
@@ -899,7 +931,6 @@ test("server allocates in-batch revisions transactionally for repeated entity ch
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:01:00.000Z",
           },
-          bodyUpload: { contentHash: "sha256:dup-2", byteLength: 35 },
         },
       ],
     })
@@ -942,7 +973,6 @@ test("server rejects path collisions instead of overwriting another note", async
           dirtyType: "upsert",
           clientUpdatedAt: "2026-01-01T00:00:00.000Z",
           metadata: { key: "note-a", title: "Note A", relativePath: "note/note-a.md" },
-          bodyUpload: { contentHash: "sha256:a", byteLength: 12 },
         },
         {
           entityType: "note",
@@ -950,7 +980,6 @@ test("server rejects path collisions instead of overwriting another note", async
           dirtyType: "upsert",
           clientUpdatedAt: "2026-01-01T00:00:00.000Z",
           metadata: { key: "note-b", title: "Note B", relativePath: "note/note-b.md" },
-          bodyUpload: { contentHash: "sha256:b", byteLength: 12 },
         },
       ],
     })
@@ -967,7 +996,6 @@ test("server rejects path collisions instead of overwriting another note", async
           dirtyType: "upsert",
           clientUpdatedAt: "2026-01-01T00:01:00.000Z",
           metadata: { key: "note-b", title: "Colliding A", relativePath: "note/note-b.md" },
-          bodyUpload: { contentHash: "sha256:collision", byteLength: 24 },
         },
       ],
     })
@@ -994,7 +1022,6 @@ test("server rejects relocation onto an existing Markdown file without a sidecar
           dirtyType: "upsert",
           clientUpdatedAt: "2026-01-01T00:00:00.000Z",
           metadata: { key: "note-a", title: "Note A", relativePath: "note/note-a.md" },
-          bodyUpload: { contentHash: "sha256:a", byteLength: 12 },
         },
       ],
     })
@@ -1012,7 +1039,6 @@ test("server rejects relocation onto an existing Markdown file without a sidecar
           dirtyType: "upsert",
           clientUpdatedAt: "2026-01-01T00:01:00.000Z",
           metadata: { key: "raw-existing", title: "Colliding Raw", relativePath: "note/raw-existing.md" },
-          bodyUpload: { contentHash: "sha256:raw-collision", byteLength: 26 },
         },
       ],
     })
@@ -1039,7 +1065,6 @@ test("server rolls back files when change metadata cannot be serialized", async 
           dirtyType: "upsert",
           clientUpdatedAt: "2026-01-01T00:00:00.000Z",
           metadata: { key: "note-bigint", title: "BigInt", relativePath: "note/note-bigint.md", unserializable: BigInt(1) },
-          bodyUpload: { contentHash: "sha256:bigint", byteLength: 23 },
         },
       ],
     })
@@ -1066,7 +1091,6 @@ test("server rolls back relocation files when sidecar validation fails", async (
           dirtyType: "upsert",
           clientUpdatedAt: "2026-01-01T00:00:00.000Z",
           metadata: { key: "note-a", title: "Note A", relativePath: "note/note-a.md" },
-          bodyUpload: { contentHash: "sha256:a", byteLength: 12 },
         },
       ],
     })
@@ -1083,7 +1107,6 @@ test("server rolls back relocation files when sidecar validation fails", async (
           dirtyType: "upsert",
           clientUpdatedAt: "not-a-date",
           metadata: { key: "note-a-renamed", title: "Bad Relocation", relativePath: "note/note-a-renamed.md", updatedAt: "not-a-date" },
-          bodyUpload: { contentHash: "sha256:bad-relocation", byteLength: 30 },
         },
       ],
     })
@@ -1140,7 +1163,6 @@ test("server holds the sync DB lock before mutating accepted push files", async 
             dirtyType: "upsert",
             clientUpdatedAt: "2026-01-01T00:00:00.000Z",
             metadata: { key: "note-locked", title: "Locked", relativePath: "note/note-locked.md" },
-            bodyUpload: { contentHash: "sha256:locked", byteLength: 23 },
           },
         ],
       }),
@@ -1172,7 +1194,6 @@ test("tombstone push deletes the note, records tombstone state, and appears in c
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
-          bodyUpload: { contentHash: "sha256:before-delete", byteLength: 20 },
         },
       ],
     })
@@ -1274,7 +1295,6 @@ test("server queues AI work after accepting note pushes without blocking or fail
               createdAt: "2026-01-01T00:00:00.000Z",
               updatedAt: "2026-01-01T00:00:00.000Z",
             },
-            bodyUpload: { contentHash: "sha256:ai", byteLength: 15 },
           },
         ],
       })

@@ -1,5 +1,6 @@
 import path from "node:path"
 import fs from "node:fs"
+import { createHash } from "node:crypto"
 
 import { STATE_NOTES_DIRECTORY } from "../config/root"
 import { UsageError } from "../core/errors"
@@ -434,7 +435,30 @@ function assertValidPullRequest(request: PullChangesRequest): void {
   }
 }
 
+function bodyContentHash(body: string): string {
+  return `sha256:${createHash("sha256").update(body, "utf8").digest("hex")}`
+}
+
+function bodyByteLength(body: string): number {
+  return Buffer.byteLength(body, "utf8")
+}
+
+function assertBodyUploadMatchesBody(record: SyncPushRecord, body: string): void {
+  if (record.bodyUpload === undefined) {
+    return
+  }
+
+  const actualContentHash = bodyContentHash(body)
+  const actualByteLength = bodyByteLength(body)
+  if (record.bodyUpload.contentHash !== actualContentHash || record.bodyUpload.byteLength !== actualByteLength) {
+    throw new UsageError(`Invalid sync body descriptor for pushed note '${record.entityId}'.`, {
+      hint: "bodyUpload.contentHash and byteLength must match the uploaded note body bytes.",
+    })
+  }
+}
+
 function upsertNote(rootPath: string, record: SyncPushRecord, body: string): MutationResult<NoteMetadata> {
+  assertBodyUploadMatchesBody(record, body)
   const metadata = noteMetadataFromPush(rootPath, record)
   const repository = createNoteRepository(rootPath)
   const sidecars = createSidecarRepository(rootPath)

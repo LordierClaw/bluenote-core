@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import { STATE_NOTES_DIRECTORY } from "../config/root.js";
 import { UsageError } from "../core/errors.js";
 import { createNoteDescription } from "../domain/note-description.js";
@@ -317,7 +318,26 @@ function assertValidPullRequest(request) {
         });
     }
 }
+function bodyContentHash(body) {
+    return `sha256:${createHash("sha256").update(body, "utf8").digest("hex")}`;
+}
+function bodyByteLength(body) {
+    return Buffer.byteLength(body, "utf8");
+}
+function assertBodyUploadMatchesBody(record, body) {
+    if (record.bodyUpload === undefined) {
+        return;
+    }
+    const actualContentHash = bodyContentHash(body);
+    const actualByteLength = bodyByteLength(body);
+    if (record.bodyUpload.contentHash !== actualContentHash || record.bodyUpload.byteLength !== actualByteLength) {
+        throw new UsageError(`Invalid sync body descriptor for pushed note '${record.entityId}'.`, {
+            hint: "bodyUpload.contentHash and byteLength must match the uploaded note body bytes.",
+        });
+    }
+}
 function upsertNote(rootPath, record, body) {
+    assertBodyUploadMatchesBody(record, body);
     const metadata = noteMetadataFromPush(rootPath, record);
     const repository = createNoteRepository(rootPath);
     const sidecars = createSidecarRepository(rootPath);
