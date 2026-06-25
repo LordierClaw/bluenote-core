@@ -2,6 +2,7 @@ import path from "node:path"
 import { existsSync, readdirSync, rmSync } from "node:fs"
 
 import { APP_STATE_NOTES_DIRECTORY } from "../config/root"
+import { createNoteDescription } from "../domain/note-description"
 import { createNoteId } from "../platform/ids"
 import type { ParsedNote } from "../storage/note-schema"
 import type { NoteSidecar } from "../storage/sidecar-schema"
@@ -38,7 +39,35 @@ export interface SyncMutationInput {
   tombstones?: TombstoneInput[]
 }
 
-export function getNoteSyncEntityId(rootPath: string, note: Pick<ParsedNote, "frontmatter" | "sourcePath">): string {
+function sidecarTypeForNote(note: Pick<ParsedNote, "frontmatter" | "sourcePath">): NoteSidecar["type"] {
+  if (note.frontmatter.archivedAt !== undefined || note.sourcePath.startsWith(".data/archive/")) {
+    return "archived"
+  }
+  if (note.sourcePath.startsWith("draft/")) {
+    return "draft"
+  }
+  return "normal"
+}
+
+function writeStableSidecarForLegacyNote(rootPath: string, note: Pick<ParsedNote, "frontmatter" | "sourcePath" | "body">): string {
+  const sidecars = createSidecarRepository(rootPath)
+  const noteId = createNoteId()
+  sidecars.write({
+    type: sidecarTypeForNote(note),
+    noteId,
+    key: note.frontmatter.id,
+    title: note.frontmatter.title,
+    description: createNoteDescription(note.body),
+    relativePath: note.sourcePath,
+    createdAt: note.frontmatter.createdAt,
+    updatedAt: note.frontmatter.updatedAt,
+    archivedAt: note.frontmatter.archivedAt ?? null,
+    namingVersion: 1,
+  })
+  return noteId
+}
+
+export function getNoteSyncEntityId(rootPath: string, note: Pick<ParsedNote, "frontmatter" | "sourcePath" | "body">): string {
   const sidecars = createSidecarRepository(rootPath)
   const notesDirectoryPath = path.join(rootPath, APP_STATE_NOTES_DIRECTORY)
 
@@ -72,7 +101,7 @@ export function getNoteSyncEntityId(rootPath: string, note: Pick<ParsedNote, "fr
     }
   }
 
-  return note.frontmatter.id
+  return writeStableSidecarForLegacyNote(rootPath, note)
 }
 
 function countPending(rootPath: string, workspaceId: string): number {

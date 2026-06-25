@@ -139,6 +139,36 @@ describe("createBlueNoteCore sync namespace", () => {
     })
   })
 
+  test("link persists a stable noteId before seeding sidecar-less legacy notes", async () => {
+    await withTempRoot("bluenote-core-sync-link-sidecarless-noteid-", async (rootPath) => {
+      const core = createBlueNoteCore({ rootPath })
+      core.init()
+      createNoteRepository(rootPath).create({
+        frontmatter: {
+          id: "sidecarless-legacy",
+          schemaVersion: 1,
+          title: "Sidecarless Legacy",
+          mode: "plain",
+          tags: [],
+          createdAt: "2026-06-01T00:00:00.000Z",
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        },
+        body: "Legacy note body.\n",
+      })
+
+      const summary = core.sync.link({
+        mode: "seed-empty-server-from-local",
+        serverUrl: "https://sync.example.test",
+      })
+
+      const seeded = createDirtyRecordRepository(rootPath, { role: "client", workspaceId: summary.workspaceId }).listDirtyRecords()
+      assert.equal(seeded.length, 1)
+      assert.notEqual(seeded[0].entityId, "sidecarless-legacy")
+      assert.match(seeded[0].entityId, /^note_/)
+      assert.equal(createSidecarRepository(rootPath).read("sidecarless-legacy").noteId, seeded[0].entityId)
+    })
+  })
+
   test("link skips archived notes during initial dirty seeding", async () => {
     await withTempRoot("bluenote-core-sync-link-archived-", async (rootPath) => {
       const core = createBlueNoteCore({ rootPath })

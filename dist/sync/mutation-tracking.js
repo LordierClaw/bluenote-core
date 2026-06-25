@@ -1,6 +1,7 @@
 import path from "node:path";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { APP_STATE_NOTES_DIRECTORY } from "../config/root.js";
+import { createNoteDescription } from "../domain/note-description.js";
 import { createNoteId } from "../platform/ids.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
@@ -8,6 +9,32 @@ import { createFolderRepository } from "./folder-repository.js";
 import { getSyncClientRuntimeMode } from "./runtime-mode.js";
 import { createSyncStatusRepository } from "./status-repository.js";
 import { createTombstoneRepository } from "./tombstone-repository.js";
+function sidecarTypeForNote(note) {
+    if (note.frontmatter.archivedAt !== undefined || note.sourcePath.startsWith(".data/archive/")) {
+        return "archived";
+    }
+    if (note.sourcePath.startsWith("draft/")) {
+        return "draft";
+    }
+    return "normal";
+}
+function writeStableSidecarForLegacyNote(rootPath, note) {
+    const sidecars = createSidecarRepository(rootPath);
+    const noteId = createNoteId();
+    sidecars.write({
+        type: sidecarTypeForNote(note),
+        noteId,
+        key: note.frontmatter.id,
+        title: note.frontmatter.title,
+        description: createNoteDescription(note.body),
+        relativePath: note.sourcePath,
+        createdAt: note.frontmatter.createdAt,
+        updatedAt: note.frontmatter.updatedAt,
+        archivedAt: note.frontmatter.archivedAt ?? null,
+        namingVersion: 1,
+    });
+    return noteId;
+}
 export function getNoteSyncEntityId(rootPath, note) {
     const sidecars = createSidecarRepository(rootPath);
     const notesDirectoryPath = path.join(rootPath, APP_STATE_NOTES_DIRECTORY);
@@ -38,7 +65,7 @@ export function getNoteSyncEntityId(rootPath, note) {
             }
         }
     }
-    return note.frontmatter.id;
+    return writeStableSidecarForLegacyNote(rootPath, note);
 }
 function countPending(rootPath, workspaceId) {
     return createDirtyRecordRepository(rootPath, { role: "client", workspaceId }).listDirtyRecords().length;

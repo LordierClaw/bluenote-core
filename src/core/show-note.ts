@@ -1,4 +1,5 @@
 import path from "node:path"
+import { existsSync } from "node:fs"
 
 import { resolveBlueNoteRoot, type ResolveBlueNoteRootOptions } from "../config/root"
 import { createSidecarRepository } from "../storage/sidecar-repository"
@@ -29,7 +30,11 @@ export function showNote(options: ShowNoteOptions): ShowNoteSummary {
 
   try {
     sidecar = sidecars.read(selected.frontmatter.id)
-  } catch {
+  } catch (error) {
+    if (existsSync(sidecars.getSidecarPath(selected.frontmatter.id))) {
+      throw error
+    }
+
     return {
       key: selected.frontmatter.id,
       title: selected.frontmatter.title,

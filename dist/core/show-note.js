@@ -1,4 +1,5 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { resolveBlueNoteRoot } from "../config/root.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { selectNote } from "./select-note.js";
@@ -13,7 +14,10 @@ export function showNote(options) {
     try {
         sidecar = sidecars.read(selected.frontmatter.id);
     }
-    catch {
+    catch (error) {
+        if (existsSync(sidecars.getSidecarPath(selected.frontmatter.id))) {
+            throw error;
+        }
         return {
             key: selected.frontmatter.id,
             title: selected.frontmatter.title,

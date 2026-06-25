@@ -2,6 +2,7 @@ import { test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
+import { writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
 import { createBlueNoteCore } from "../../../src"
@@ -37,5 +38,25 @@ test("showNote reads descriptions from noteId-keyed sidecars", async () => {
     })
 
     assert.equal(showNote({ override: rootPath, selector: created.key }).description, "Generated sidecar description.")
+  })
+})
+
+test("showNote surfaces malformed existing key sidecars instead of falling back", async () => {
+  await withRoot((rootPath) => {
+    const core = createBlueNoteCore({ rootPath })
+    core.init()
+    const created = core.notes.create({
+      type: "normal",
+      title: "Malformed Sidecar",
+      body: "Body fallback must not hide sidecar corruption.",
+      destinationFolder: "note",
+      enqueueAi: false,
+      noteIdGenerator: () => "note_show_malformed_sidecar",
+      randomSource: () => 0,
+    })
+    const sidecars = createSidecarRepository(rootPath)
+    writeFileSync(sidecars.getSidecarPath(created.key), "{not json", "utf8")
+
+    assert.throws(() => showNote({ override: rootPath, selector: created.key }), /parse sidecar|sidecar/i)
   })
 })
