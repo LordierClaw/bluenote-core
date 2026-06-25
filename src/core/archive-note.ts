@@ -39,7 +39,6 @@ export function archiveNote(options: ArchiveNoteOptions): ArchiveNoteSummary {
   const rootPath = ensureManagedRoot(resolveBlueNoteRoot(options))
   const repository = createNoteRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility ?? "normal" })
-  const syncEntityId = getNoteSyncEntityId(rootPath, selected)
 
   if (isArchivedNote(selected)) {
     throw new UsageError(`Note '${selected.sourcePath}' is already archived.`, {
@@ -59,6 +58,7 @@ export function archiveNote(options: ArchiveNoteOptions): ArchiveNoteSummary {
     throwArchiveValidationError("before", selected.sourcePath, preflightRebuildSummary.validationErrors)
   }
 
+  const syncEntityId = getNoteSyncEntityId(rootPath, selected)
   const archivedAt = (options.clock ?? systemClock).now().toISOString()
   const archived = repository.archive(`${rootPath}/${selected.sourcePath}`, archivedAt)
 

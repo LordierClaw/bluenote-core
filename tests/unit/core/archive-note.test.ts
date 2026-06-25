@@ -140,3 +140,47 @@ test("archiveNote keeps sync delete dirty when post-archive rebuild reports vali
     await rm(rootPath, { recursive: true, force: true })
   }
 })
+
+
+test("archiveNote does not migrate sidecar-less legacy Markdown when preflight validation fails", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-archive-note-preflight-legacy-"))
+  const legacyPath = path.join(rootPath, "note", "legacy.md")
+  const legacyMarkdown = `---
+id: legacy
+schemaVersion: 1
+title: Legacy
+mode: plain
+tags: []
+createdAt: 2026-06-01T00:00:00.000Z
+updatedAt: 2026-06-02T00:00:00.000Z
+---
+Legacy body.
+`
+
+  try {
+    await mkdir(path.dirname(legacyPath), { recursive: true })
+    await mkdir(path.join(rootPath, ".data", "notes"), { recursive: true })
+    await writeFile(legacyPath, legacyMarkdown, "utf8")
+    await writeFile(path.join(rootPath, ".data", "notes", "broken.json"), JSON.stringify({
+      type: "normal",
+      key: "broken",
+      title: "Broken",
+      description: "Broken sidecar",
+      relativePath: "note/missing.md",
+      createdAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2026-06-02T00:00:00.000Z",
+      archivedAt: null,
+      namingVersion: 1,
+    }, null, 2) + "\n", "utf8")
+
+    assert.throws(
+      () => archiveNote({ override: rootPath, selector: "legacy" }),
+      /Validation failed before archiving/i,
+    )
+
+    assert.equal(await readFile(legacyPath, "utf8"), legacyMarkdown)
+    await assert.rejects(() => access(path.join(rootPath, ".data", "notes", "legacy.json")))
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})

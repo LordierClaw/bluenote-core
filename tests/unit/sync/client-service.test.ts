@@ -620,6 +620,29 @@ describe("sync client service", () => {
     })
   })
 
+
+  test("initial pull pagination stops when a hasMore response does not advance the cursor", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const pullSinceSequences: number[] = []
+      const transport = makeTransport({
+        pull: (request) => {
+          pullSinceSequences.push(request.sinceSequence)
+          return {
+            workspaceId: request.workspaceId,
+            fromSequence: request.sinceSequence,
+            toSequence: request.sinceSequence,
+            hasMore: true,
+            changes: [],
+          }
+        },
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 0 })
+      assert.deepEqual(pullSinceSequences, [0])
+    })
+  })
+
   test("push response does not mark unseen server changes as pulled", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

@@ -453,6 +453,9 @@ export function createSyncClientService(options) {
                     }
                 }
                 pulled += response.changes.length;
+                if (response.toSequence <= sinceSequence) {
+                    break;
+                }
                 sinceSequence = response.toSequence;
                 writeReplicaProgress(rootPath, identity, replicaId, sinceSequence);
                 if (!response.hasMore) {
