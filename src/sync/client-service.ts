@@ -236,6 +236,27 @@ function findSidecarOwnerForRelativePath(rootPath: string, relativePath: string)
   return null
 }
 
+function findSidecarOwnerForKey(rootPath: string, key: string): string | null {
+  const stateNotesPath = getStateNotesPath(rootPath)
+  const sidecars = createSidecarRepository(rootPath)
+  if (!fs.existsSync(stateNotesPath)) {
+    return null
+  }
+
+  for (const entry of fs.readdirSync(stateNotesPath, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      continue
+    }
+    const noteId = path.basename(entry.name, ".json")
+    const sidecar = sidecars.readByNoteId(noteId)
+    if (sidecar.key === key) {
+      return sidecar.noteId ?? noteId
+    }
+  }
+
+  return null
+}
+
 function assertPulledNotePathAvailable(rootPath: string, relativePath: string, noteId: string): void {
   const owner = findSidecarOwnerForRelativePath(rootPath, relativePath)
   if (owner !== null && owner !== noteId) {
@@ -253,6 +274,15 @@ function assertPulledNotePathAvailable(rootPath: string, relativePath: string, n
   }
 }
 
+function assertPulledNoteKeyAvailable(rootPath: string, key: string, noteId: string): void {
+  const owner = findSidecarOwnerForKey(rootPath, key)
+  if (owner !== null && owner !== noteId) {
+    throw new UsageError(`Pulled note key '${key}' is already owned by another note.`, {
+      hint: "Rejecting pulled note relocation to avoid duplicate local note keys.",
+    })
+  }
+}
+
 function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: string): void {
   const notes = createNoteRepository(rootPath)
   const sidecars = createSidecarRepository(rootPath)
@@ -261,6 +291,7 @@ function applyPulledNoteUpsert(rootPath: string, change: SyncChangeView, body: s
   const key = metadataString(change.metadata, "key") ?? basenameKey(relativePath)
   assertMetadataKeyMatchesRelativePath(key, relativePath)
   assertPulledNotePathAvailable(rootPath, relativePath, change.entityId)
+  assertPulledNoteKeyAvailable(rootPath, key, change.entityId)
   const title = metadataString(change.metadata, "title") ?? change.title ?? key
   const description = metadataString(change.metadata, "description") ?? createNoteDescription(body)
   const updatedAt = metadataString(change.metadata, "updatedAt") ?? change.changedAt

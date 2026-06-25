@@ -248,6 +248,41 @@ test("server rejects nested draft note sync paths", async () => {
 })
 
 
+
+test("server rejects future push cursors before mutating note files", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 10,
+      noteBodies: { "future-note": "Future body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "future-note",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "future-note",
+          title: "Future Note",
+          relativePath: "note/future-note.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }],
+    })
+
+    assert.deepEqual(response.accepted, [])
+    assert.equal(response.rejected.length, 1)
+    assert.equal(response.rejected[0].code, "STALE_BASE_SEQUENCE")
+    assert.match(response.rejected[0].message, /baseSequence 10; server is at sequence 0/)
+    assert.equal(response.serverSequence, 0)
+    assert.equal(existsSync(path.join(rootPath, "note", "future-note.md")), false)
+    assert.equal(readServerChanges(rootPath).length, 0)
+  })
+})
+
 test("server rejects hidden note sync paths", async () => {
   await withRoot((rootPath) => {
     const server = createSyncServerService({ rootPath, workspaceId })

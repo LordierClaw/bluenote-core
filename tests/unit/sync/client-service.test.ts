@@ -196,6 +196,66 @@ describe("sync client service", () => {
     })
   })
 
+
+  test("pulled renames reject keys owned by another local note", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const synced = core.notes.create({
+        type: "normal",
+        title: "Synced Original",
+        body: "Original body.\n",
+        destinationFolder: "note",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-synced-original",
+      })
+      const local = core.notes.create({
+        type: "normal",
+        title: "Local Duplicate",
+        body: "Local body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-local-duplicate",
+      })
+      const transport = makeTransport({
+        bodies: { [synced.noteId]: "Renamed remote body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "note",
+            entityId: synced.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T04:00:00.000Z",
+            title: "Local Duplicate",
+            relativePath: local.relativePath,
+            bodyAvailable: true,
+            sourceReplicaId: "remote-replica",
+            metadata: {
+              key: local.key,
+              relativePath: local.relativePath,
+              title: "Local Duplicate",
+              createdAt: "2026-06-24T04:00:00.000Z",
+              updatedAt: "2026-06-24T04:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /already owned by another note/,
+      )
+      assert.equal(readFileSync(path.join(rootPath, synced.relativePath), "utf8"), "Original body.\n")
+      assert.equal(readFileSync(path.join(rootPath, local.relativePath), "utf8"), "Local body.\n")
+    })
+  })
+
   test("sync cycle surfaces rejected pushes and keeps dirty records pending", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

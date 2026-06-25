@@ -613,12 +613,12 @@ export function createSyncServerService(options) {
                     handle.db.run("BEGIN IMMEDIATE TRANSACTION");
                     try {
                         const currentServerSequence = latestServerSequence(handle);
-                        if (request.baseSequence < currentServerSequence) {
+                        if (request.baseSequence !== currentServerSequence) {
                             const rejected = request.records.map((record) => ({
                                 entityType: record.entityType,
                                 entityId: record.entityId,
                                 code: "STALE_BASE_SEQUENCE",
-                                message: `Stale sync push baseSequence ${request.baseSequence}; server is at sequence ${currentServerSequence}. Pull latest changes before pushing again.`,
+                                message: `Stale or invalid sync push baseSequence ${request.baseSequence}; server is at sequence ${currentServerSequence}. Pull latest changes before pushing again.`,
                             }));
                             handle.db.run("COMMIT");
                             return {
