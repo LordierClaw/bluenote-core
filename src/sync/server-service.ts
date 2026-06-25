@@ -626,13 +626,60 @@ function assertWorkspace(expectedWorkspaceId: string, receivedWorkspaceId: strin
   }
 }
 
-function queueAiWork(queueAiWork: SyncServerAiQueue | undefined, noteId: string): void {
+function readAiPublishSnapshot(rootPath: string, noteId: string): string | null {
+  const sidecars = createSidecarRepository(rootPath)
+  const sidecarPath = sidecars.getSidecarPathByNoteId(noteId)
+  if (!fs.existsSync(sidecarPath)) {
+    return null
+  }
+  return fs.readFileSync(sidecarPath, "utf8")
+}
+
+function publishAiSidecarChange(rootPath: string, dbIdentity: EnsureSyncDatabaseOptions, workspaceId: string, noteId: string): void {
+  const sidecar = readSidecarIfExists(rootPath, noteId)
+  if (sidecar === null) {
+    return
+  }
+
+  withSyncDatabase(rootPath, dbIdentity, (handle) => {
+    const serverRevision = latestServerRevision(handle, "note", noteId) + 1
+    insertServerChange(handle, workspaceId, {
+      entityType: "note",
+      entityId: noteId,
+      changeType: "upsert",
+      serverRevision,
+      changedAt: new Date().toISOString(),
+      sourceReplicaId: "server-ai",
+      title: sidecar.title,
+      relativePath: sidecar.relativePath,
+      bodyAvailable: true,
+      metadata: {
+        key: sidecar.key,
+        title: sidecar.title,
+        description: sidecar.description,
+        relativePath: sidecar.relativePath,
+        createdAt: sidecar.createdAt,
+        updatedAt: sidecar.updatedAt,
+        ...(sidecar.ai === undefined ? {} : { ai: sidecar.ai }),
+      },
+    })
+  }, { save: true })
+}
+
+function queueAiWork(rootPath: string, dbIdentity: EnsureSyncDatabaseOptions, workspaceId: string, queueAiWork: SyncServerAiQueue | undefined, noteId: string): void {
   if (queueAiWork === undefined) {
     return
   }
 
+  const before = readAiPublishSnapshot(rootPath, noteId)
   Promise.resolve()
     .then(() => queueAiWork({ noteId, reason: "sync-push" }))
+    .then(() => {
+      const after = readAiPublishSnapshot(rootPath, noteId)
+      if (after !== null && after !== before) {
+        publishAiSidecarChange(rootPath, dbIdentity, workspaceId, noteId)
+      }
+    })
     .catch(() => undefined)
 }
 
@@ -793,7 +840,7 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
       }
 
       for (const noteId of aiNoteIds) {
-        queueAiWork(options.queueAiWork, noteId)
+        queueAiWork(rootPath, dbIdentity, options.workspaceId, options.queueAiWork, noteId)
       }
 
       return response

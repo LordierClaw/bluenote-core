@@ -432,6 +432,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
         fs.existsSync(notePath)
         || fs.existsSync(legacySidecarPath)
         || (noteIdSidecarPath !== undefined && fs.existsSync(noteIdSidecarPath))
+        || (input.noteId !== undefined && input.noteId !== canonicalFrontmatter.id && noteKeyExists(normalizedRootPath, input.noteId))
         || noteKeyExists(normalizedRootPath, canonicalFrontmatter.id)
       ) {
         throw new UsageError(`Could not create note '${relativePath}'.`, {

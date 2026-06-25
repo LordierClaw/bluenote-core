@@ -1046,3 +1046,66 @@ test("server queues AI work after accepting note pushes without blocking or fail
     await queueFinished
   })
 })
+
+
+test("server publishes queued AI sidecar updates as pullable note changes", async () => {
+  await withRoot(async (rootPath) => {
+    const server = createSyncServerService({
+      rootPath,
+      workspaceId,
+      queueAiWork: async ({ noteId }) => {
+        const sidecars = createSidecarRepository(rootPath)
+        sidecars.write({
+          ...sidecars.readByNoteId(noteId),
+          description: "Generated server AI description.",
+          ai: { description: { lastProcessedAt: "2026-01-01T00:01:00.000Z" } },
+        })
+      },
+    })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-ai-1": "AI body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-ai-1",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "ai-note",
+          title: "AI Note",
+          relativePath: "note/ai-note.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }],
+    })
+    assert.equal(response.serverSequence, 1)
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const rows = readServerChanges(rootPath)
+    assert.equal(rows.length, 2)
+    assert.deepEqual(rows.map((row) => row.slice(1, 5)), [
+      ["note", "note-ai-1", "upsert", 1],
+      ["note", "note-ai-1", "upsert", 2],
+    ])
+
+    const changes = server.getChanges({ workspaceId, sinceSequence: 1, limit: 10 })
+    assert.equal(changes.toSequence, 2)
+    assert.equal(changes.changes.length, 1)
+    assert.equal(changes.changes[0].sourceReplicaId, "server-ai")
+    assert.equal(changes.changes[0].bodyAvailable, true)
+    assert.deepEqual(changes.changes[0].metadata, {
+      key: "ai-note",
+      title: "AI Note",
+      description: "Generated server AI description.",
+      relativePath: "note/ai-note.md",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      ai: { description: { lastProcessedAt: "2026-01-01T00:01:00.000Z" } },
+    })
+  })
+})

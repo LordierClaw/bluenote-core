@@ -90,6 +90,35 @@ test("repository writes schema 3 sidecars by noteId while preserving key and mar
   }
 })
 
+
+
+test("repository rejects custom noteIds that shadow an existing note key", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-noteid-key-shadow-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    repository.create({
+      noteId: "note_existing_key_shadow",
+      frontmatter: { ...FIXED_FRONTMATTER, id: "existing-key", title: "Existing Key" },
+      body: "Existing body.\n",
+    })
+
+    assert.throws(
+      () => repository.create({
+        noteId: "existing-key",
+        frontmatter: { ...FIXED_FRONTMATTER, id: "new-key", title: "New Key" },
+        body: "New body.\n",
+      }),
+      UsageError,
+    )
+
+    await assert.rejects(access(path.join(getStateNotesPath(rootPath), "existing-key.json")))
+    assert.equal(await readFile(path.join(rootPath, "note", "existing-key.md"), "utf8"), "Existing body.\n")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("repository list reads typed normal sidecars produced by create", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-list-sidecars-"))
 

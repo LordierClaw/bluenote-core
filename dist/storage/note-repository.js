@@ -298,6 +298,7 @@ export function createNoteRepository(rootPath) {
             if (fs.existsSync(notePath)
                 || fs.existsSync(legacySidecarPath)
                 || (noteIdSidecarPath !== undefined && fs.existsSync(noteIdSidecarPath))
+                || (input.noteId !== undefined && input.noteId !== canonicalFrontmatter.id && noteKeyExists(normalizedRootPath, input.noteId))
                 || noteKeyExists(normalizedRootPath, canonicalFrontmatter.id)) {
                 throw new UsageError(`Could not create note '${relativePath}'.`, {
                     hint: "A note with the same basename/key already exists somewhere under note/, draft/, or in sidecar metadata. Use a different id or remove/archive the existing note first.",
