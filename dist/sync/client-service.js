@@ -389,6 +389,9 @@ function rejectedPushMessage(response) {
 function isOwnEcho(change, replicaId) {
     return change.sourceReplicaId === replicaId;
 }
+function hasLocalDirtyRecord(dirty, change) {
+    return dirty.listDirtyRecords().some((record) => record.entityType === change.entityType && record.entityId === change.entityId);
+}
 export function createSyncClientService(options) {
     const rootPath = path.resolve(options.rootPath);
     const replicaId = options.replicaId ?? "local";
@@ -407,8 +410,10 @@ export function createSyncClientService(options) {
                     if (isOwnEcho(change, replicaId)) {
                         continue;
                     }
+                    if (hasLocalDirtyRecord(dirty, change)) {
+                        continue;
+                    }
                     if (applyPulledChange(rootPath, identity, change, options.transport)) {
-                        dirty.clearDirtyRecord(change.entityType, change.entityId);
                         needsRebuild = true;
                     }
                 }
@@ -438,8 +443,10 @@ export function createSyncClientService(options) {
                         if (isOwnEcho(change, replicaId)) {
                             continue;
                         }
+                        if (hasLocalDirtyRecord(dirty, change)) {
+                            continue;
+                        }
                         if (applyPulledChange(rootPath, identity, change, options.transport)) {
-                            dirty.clearDirtyRecord(change.entityType, change.entityId);
                             needsRebuild = true;
                         }
                     }

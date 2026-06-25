@@ -450,6 +450,10 @@ function isOwnEcho(change: SyncChangeView, replicaId: string): boolean {
   return change.sourceReplicaId === replicaId
 }
 
+function hasLocalDirtyRecord(dirty: ReturnType<typeof createDirtyRecordRepository>, change: SyncChangeView): boolean {
+  return dirty.listDirtyRecords().some((record) => record.entityType === change.entityType && record.entityId === change.entityId)
+}
+
 export function createSyncClientService(options: CreateSyncClientServiceOptions): SyncClientService {
   const rootPath = path.resolve(options.rootPath)
   const replicaId = options.replicaId ?? "local"
@@ -470,8 +474,10 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
           if (isOwnEcho(change, replicaId)) {
             continue
           }
+          if (hasLocalDirtyRecord(dirty, change)) {
+            continue
+          }
           if (applyPulledChange(rootPath, identity, change, options.transport)) {
-            dirty.clearDirtyRecord(change.entityType, change.entityId)
             needsRebuild = true
           }
         }
@@ -503,8 +509,10 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
             if (isOwnEcho(change, replicaId)) {
               continue
             }
+            if (hasLocalDirtyRecord(dirty, change)) {
+              continue
+            }
             if (applyPulledChange(rootPath, identity, change, options.transport)) {
-              dirty.clearDirtyRecord(change.entityType, change.entityId)
               needsRebuild = true
             }
           }
