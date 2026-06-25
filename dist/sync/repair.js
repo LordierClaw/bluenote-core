@@ -31,7 +31,7 @@ export function repairSyncState(rootPath, options = {}) {
         const dirtyRepository = createDirtyRecordRepository(rootPath, { role: "client", workspaceId: runtimeMode.workspaceId });
         const sidecars = createSidecarRepository(rootPath);
         for (const record of dirtyRepository.listDirtyRecords()) {
-            if (record.entityType !== "note") {
+            if (record.entityType !== "note" || record.dirtyType === "delete") {
                 continue;
             }
             const sidecarPath = sidecars.getSidecarPathByNoteId(record.entityId);

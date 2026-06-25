@@ -5,7 +5,7 @@ import path from "node:path"
 import { existsSync, readFileSync, unlinkSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 
-import { createBlueNoteCore, createDirtyRecordRepository, UsageError } from "@lordierclaw/bluenote-core"
+import { createBlueNoteCore, createDirtyRecordRepository, createSidecarRepository, UsageError } from "@lordierclaw/bluenote-core"
 import { getSyncDatabasePath } from "../../../src/sync/sync-db"
 import { getStateManifestPath } from "../../../src/storage/state-manifest"
 
@@ -75,6 +75,39 @@ describe("sync repair", () => {
       assert.deepEqual(readFileSync(syncDatabasePath), databaseBefore)
     })
   })
+
+  test("dry run does not report pending note deletes as missing sidecars", async () => {
+    await withTempRoot("bluenote-sync-repair-pending-delete-", (rootPath) => {
+      const core = createBlueNoteCore({ rootPath })
+      core.init()
+      const created = core.notes.create({
+        type: "normal",
+        title: "Pending Delete",
+        body: "Delete me.\n",
+        destinationFolder: "note",
+        enqueueAi: false,
+        noteIdGenerator: () => "note_pending_delete",
+      })
+      const linkSummary = core.sync.link({ mode: "seed-empty-server-from-local", serverUrl: "https://sync.example.test" })
+      const sidecarPath = createSidecarRepository(rootPath).getSidecarPathByNoteId(created.noteId)
+
+      core.notes.delete(created.key, { force: true })
+
+      assert.equal(existsSync(sidecarPath), false)
+      const dirtyRecords = createDirtyRecordRepository(rootPath, { role: "client", workspaceId: linkSummary.workspaceId }).listDirtyRecords()
+      assert.deepEqual(dirtyRecords.map((record) => [record.entityType, record.entityId, record.dirtyType]), [
+        ["note", created.noteId, "delete"],
+      ])
+
+      const report = core.sync.repair({ dryRun: true })
+
+      assert.equal(report.dryRun, true)
+      assert.equal(report.changed, false)
+      assert.equal(report.issuesFound, 0)
+      assert.deepEqual(report.issues, [])
+    })
+  })
+
 
   test("mutating repair requires dryRun false plus explicit confirmation", async () => {
     await withTempRoot("bluenote-sync-repair-confirmation-", (rootPath) => {

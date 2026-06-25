@@ -40,7 +40,7 @@ export function repairSyncState(rootPath: string, options: SyncRepairOptions = {
     const sidecars = createSidecarRepository(rootPath)
 
     for (const record of dirtyRepository.listDirtyRecords()) {
-      if (record.entityType !== "note") {
+      if (record.entityType !== "note" || record.dirtyType === "delete") {
         continue
       }
 
