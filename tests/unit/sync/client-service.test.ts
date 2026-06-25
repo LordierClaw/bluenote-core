@@ -347,6 +347,41 @@ describe("sync client service", () => {
     })
   })
 
+
+  test("pulled note upserts reject normalized nested draft paths", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        bodies: { "nested-draft": "Nested draft body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 3,
+          hasMore: false,
+          changes: [{
+            sequence: 3,
+            entityType: "note",
+            entityId: "nested-draft",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Nested Draft",
+            relativePath: "note/../draft/nested/foo.md",
+            bodyAvailable: true,
+            metadata: { key: "foo", relativePath: "note/../draft/nested/foo.md", title: "Nested Draft", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /Invalid pulled note relativePath/,
+      )
+      assert.equal(existsSync(path.join(rootPath, "draft", "nested", "foo.md")), false)
+      assert.deepEqual(listRecoveryOrConflictFiles(rootPath), [])
+    })
+  })
+
   test("pulled draft note upserts create local drafts", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

@@ -46,6 +46,11 @@ function normalizeNoteRelativePath(rootPath, relativePath) {
     if (!isNormalizedSyncNotePath || !normalizedRelativePath.endsWith(".md")) {
         throw new Error(`Invalid pulled note relativePath '${relativePath}'.`);
     }
+    if (normalizedRelativePath.startsWith("draft/") && path.posix.dirname(normalizedRelativePath) !== "draft") {
+        throw new UsageError(`Invalid pulled note relativePath '${relativePath}'.`, {
+            hint: "Draft note sync paths must be direct children of draft/.",
+        });
+    }
     return normalizedRelativePath;
 }
 function destinationForPulledNote(relativePath) {

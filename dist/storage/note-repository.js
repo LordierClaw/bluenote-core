@@ -237,10 +237,32 @@ function listSidecarKeys(rootPath) {
         .filter((entry) => entry.endsWith(".json"))
         .map((entry) => path.basename(entry, ".json"));
 }
-function findSidecarForNote(rootPath, sidecars, key, relativePath) {
+function sidecarIndexKey(key, relativePath) {
+    return `${key}\u0000${path.normalize(relativePath)}`;
+}
+function buildSidecarIndex(rootPath, sidecars) {
+    const index = new Map();
+    for (const sidecarKey of listSidecarKeys(rootPath)) {
+        try {
+            const sidecar = sidecars.read(sidecarKey);
+            index.set(sidecarIndexKey(sidecar.key, sidecar.relativePath), sidecar);
+        }
+        catch {
+            // Ignore unrelated malformed sidecars while building a bulk-read cache;
+            // direct reads through the legacy key fast path still surface targeted
+            // sidecar errors.
+        }
+    }
+    return index;
+}
+function findSidecarForNote(rootPath, sidecars, key, relativePath, sidecarIndex) {
     const legacySidecarPath = sidecars.getSidecarPath(key);
     if (fs.existsSync(legacySidecarPath)) {
         return sidecars.read(key);
+    }
+    const indexedSidecar = sidecarIndex?.get(sidecarIndexKey(key, relativePath));
+    if (indexedSidecar !== undefined) {
+        return indexedSidecar;
     }
     for (const sidecarKey of listSidecarKeys(rootPath)) {
         let sidecar;
@@ -288,6 +310,37 @@ function folderNameFromInput(input) {
 export function createNoteRepository(rootPath) {
     const normalizedRootPath = path.resolve(rootPath);
     const sidecars = createSidecarRepository(normalizedRootPath);
+    function readNote(notePath, sidecarIndex) {
+        const normalizedNotePath = assertPathInsideRoot(normalizedRootPath, notePath);
+        const relativePath = toRootRelativePath(normalizedRootPath, normalizedNotePath);
+        const key = keyFromNotePath(normalizedNotePath);
+        let markdown;
+        try {
+            markdown = fs.readFileSync(normalizedNotePath, "utf8");
+        }
+        catch (error) {
+            wrapRepositoryError("read", relativePath, error);
+        }
+        try {
+            const plainNote = parsePlainNote(markdown, relativePath);
+            const sidecar = findSidecarForNote(normalizedRootPath, sidecars, key, relativePath, sidecarIndex);
+            if (sidecar === undefined) {
+                return parseNoteFile(markdown, relativePath);
+            }
+            if (path.normalize(sidecar.relativePath) !== path.normalize(relativePath)) {
+                throw new NoteMetadataPathMismatchError(`Note metadata for '${sidecar.key}' points to '${sidecar.relativePath}' instead of '${relativePath}'.`, {
+                    hint: "Rebuild or repair the note sidecar so its relativePath matches the note file.",
+                });
+            }
+            return buildParsedNote(sidecar, plainNote);
+        }
+        catch (error) {
+            if (error instanceof NoteMetadataPathMismatchError) {
+                throw error;
+            }
+            wrapRepositoryError("read", relativePath, error);
+        }
+    }
     return {
         create(input) {
             const canonicalFrontmatter = validateNoteFrontmatter(input.frontmatter, getCreateValidationSourcePath(input.frontmatter));
@@ -337,35 +390,7 @@ export function createNoteRepository(rootPath) {
             };
         },
         read(notePath) {
-            const normalizedNotePath = assertPathInsideRoot(normalizedRootPath, notePath);
-            const relativePath = toRootRelativePath(normalizedRootPath, normalizedNotePath);
-            const key = keyFromNotePath(normalizedNotePath);
-            let markdown;
-            try {
-                markdown = fs.readFileSync(normalizedNotePath, "utf8");
-            }
-            catch (error) {
-                wrapRepositoryError("read", relativePath, error);
-            }
-            try {
-                const plainNote = parsePlainNote(markdown, relativePath);
-                const sidecar = findSidecarForNote(normalizedRootPath, sidecars, key, relativePath);
-                if (sidecar === undefined) {
-                    return parseNoteFile(markdown, relativePath);
-                }
-                if (path.normalize(sidecar.relativePath) !== path.normalize(relativePath)) {
-                    throw new NoteMetadataPathMismatchError(`Note metadata for '${sidecar.key}' points to '${sidecar.relativePath}' instead of '${relativePath}'.`, {
-                        hint: "Rebuild or repair the note sidecar so its relativePath matches the note file.",
-                    });
-                }
-                return buildParsedNote(sidecar, plainNote);
-            }
-            catch (error) {
-                if (error instanceof NoteMetadataPathMismatchError) {
-                    throw error;
-                }
-                wrapRepositoryError("read", relativePath, error);
-            }
+            return readNote(notePath);
         },
         readRaw(notePath) {
             const normalizedNotePath = assertPathInsideRoot(normalizedRootPath, notePath);
@@ -752,7 +777,8 @@ export function createNoteRepository(rootPath) {
             };
         },
         list() {
-            return this.listNotePaths().map((record) => this.read(record.notePath));
+            const sidecarIndex = buildSidecarIndex(normalizedRootPath, sidecars);
+            return this.listNotePaths().map((record) => readNote(record.notePath, sidecarIndex));
         },
         listNotePaths() {
             const notePaths = [];

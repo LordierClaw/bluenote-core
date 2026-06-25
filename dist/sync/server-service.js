@@ -39,9 +39,21 @@ function normalizeRelativePath(relativePath, rootPath) {
         });
     }
     const absolutePath = assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath));
-    const allowedRoot = portableRelativePath.startsWith("draft/") ? getDraftNotesPath(rootPath) : getNormalNotesPath(rootPath);
+    const normalizedRelativePath = toRootRelativePath(rootPath, absolutePath);
+    const isNormalizedSyncNotePath = normalizedRelativePath.startsWith("note/") || normalizedRelativePath.startsWith("draft/");
+    if (!isNormalizedSyncNotePath || !normalizedRelativePath.endsWith(".md")) {
+        throw new UsageError(`Invalid sync note relativePath '${relativePath}'.`, {
+            hint: "Note sync pushes must target Markdown files under note/ or draft/.",
+        });
+    }
+    if (normalizedRelativePath.startsWith("draft/") && path.posix.dirname(normalizedRelativePath) !== "draft") {
+        throw new UsageError(`Invalid sync note relativePath '${relativePath}'.`, {
+            hint: "Draft note sync paths must be direct children of draft/.",
+        });
+    }
+    const allowedRoot = normalizedRelativePath.startsWith("draft/") ? getDraftNotesPath(rootPath) : getNormalNotesPath(rootPath);
     assertPathInsideRoot(allowedRoot, absolutePath);
-    return toRootRelativePath(rootPath, absolutePath);
+    return normalizedRelativePath;
 }
 function normalizeFolderRelativePath(relativePath, rootPath) {
     const portableRelativePath = relativePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/u, "");

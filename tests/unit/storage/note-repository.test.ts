@@ -160,6 +160,50 @@ test("repository read ignores unrelated malformed sidecars when noteId sidecar l
   }
 })
 
+
+
+test("repository list indexes noteId sidecars once for schema 3 notes", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-list-sidecar-index-"))
+
+  try {
+    const repository = createNoteRepository(rootPath)
+    for (let index = 0; index < 3; index += 1) {
+      repository.create({
+        noteId: `note_list_index_${index}`,
+        frontmatter: {
+          ...FIXED_FRONTMATTER,
+          id: `list-index-${index}`,
+          title: `List Index ${index}`,
+        },
+        body: `Body ${index}.\n`,
+      })
+    }
+
+    const originalReaddirSync = fs.readdirSync
+    let stateSidecarDirectoryReads = 0
+    const mock = mockMethod(fs, "readdirSync", ((...args: Parameters<typeof fs.readdirSync>) => {
+      if (path.resolve(String(args[0])) === path.resolve(getStateNotesPath(rootPath))) {
+        stateSidecarDirectoryReads += 1
+      }
+      return originalReaddirSync.apply(fs, args as never)
+    }) as typeof fs.readdirSync)
+
+    try {
+      assert.deepEqual(repository.list().map((note) => note.frontmatter.id), [
+        "list-index-0",
+        "list-index-1",
+        "list-index-2",
+      ])
+    } finally {
+      mock.mock.restore()
+    }
+
+    assert.equal(stateSidecarDirectoryReads, 1)
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("repository creates a draft note under draft with a typed sidecar", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-note-repository-draft-"))
 
