@@ -36,10 +36,6 @@ export function archiveNote(options) {
     }
     const archivedAt = (options.clock ?? systemClock).now().toISOString();
     const archived = repository.archive(`${rootPath}/${selected.sourcePath}`, archivedAt);
-    const rebuildSummary = rebuildIndexes({ override: rootPath });
-    if (rebuildSummary.validationErrors.length > 0) {
-        throwArchiveValidationError("after", selected.sourcePath, rebuildSummary.validationErrors);
-    }
     recordSyncMutationBestEffort(rootPath, {
         notes: [{
                 entityId: syncEntityId,
@@ -53,6 +49,10 @@ export function archiveNote(options) {
                 },
             }],
     });
+    const rebuildSummary = rebuildIndexes({ override: rootPath });
+    if (rebuildSummary.validationErrors.length > 0) {
+        throwArchiveValidationError("after", selected.sourcePath, rebuildSummary.validationErrors);
+    }
     return {
         rootPath,
         notePath: archived.notePath,

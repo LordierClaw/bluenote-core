@@ -1,4 +1,4 @@
-import { test } from "vitest"
+import { test, vi } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
@@ -87,6 +87,56 @@ test("archiveNote marks the archived note dirty in sync-client mode", async () =
       },
     ])
   } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("archiveNote keeps sync delete dirty when post-archive rebuild reports validation errors", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-archive-note-sync-dirty-rebuild-error-"))
+
+  try {
+    await enableSyncClientMode(rootPath)
+    await writeSidecarNote(rootPath, { noteId: "note_archive_dirty_rebuild", key: "roadmap", title: "Roadmap", relativePath: "note/work/roadmap.md" })
+    vi.resetModules()
+    let rebuildCalls = 0
+    vi.doMock("../../../src/core/rebuild-indexes", () => ({
+      rebuildIndexes: () => {
+        rebuildCalls += 1
+        return {
+          rootPath,
+          noteCount: rebuildCalls === 1 ? 1 : 0,
+          validationErrors: rebuildCalls === 1 ? [] : ["post-archive validation failed"],
+        }
+      },
+    }))
+    const { archiveNote: archiveNoteWithMockedRebuild } = await import("../../../src/core/archive-note")
+
+    assert.throws(() => archiveNoteWithMockedRebuild({
+      override: rootPath,
+      selector: "roadmap",
+      clock: { now: () => new Date("2026-06-07T12:00:00.000Z") },
+    }))
+    assert.equal(rebuildCalls, 2)
+
+    assert.deepEqual(listDirtyRecords(rootPath), [
+      {
+        entityType: "note",
+        entityId: "note_archive_dirty_rebuild",
+        dirtyType: "delete",
+        markedAt: "2026-06-07T12:00:00.000Z",
+        attempts: 0,
+        lastError: null,
+        metadata: {
+          archivedAt: "2026-06-07T12:00:00.000Z",
+          key: "roadmap",
+          previousRelativePath: "note/work/roadmap.md",
+          title: "Roadmap",
+        },
+      },
+    ])
+  } finally {
+    vi.doUnmock("../../../src/core/rebuild-indexes")
+    vi.resetModules()
     await rm(rootPath, { recursive: true, force: true })
   }
 })

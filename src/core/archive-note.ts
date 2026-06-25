@@ -62,12 +62,6 @@ export function archiveNote(options: ArchiveNoteOptions): ArchiveNoteSummary {
   const archivedAt = (options.clock ?? systemClock).now().toISOString()
   const archived = repository.archive(`${rootPath}/${selected.sourcePath}`, archivedAt)
 
-  const rebuildSummary = rebuildIndexes({ override: rootPath })
-
-  if (rebuildSummary.validationErrors.length > 0) {
-    throwArchiveValidationError("after", selected.sourcePath, rebuildSummary.validationErrors)
-  }
-
   recordSyncMutationBestEffort(rootPath, {
     notes: [{
       entityId: syncEntityId,
@@ -81,6 +75,12 @@ export function archiveNote(options: ArchiveNoteOptions): ArchiveNoteSummary {
       },
     }],
   })
+
+  const rebuildSummary = rebuildIndexes({ override: rootPath })
+
+  if (rebuildSummary.validationErrors.length > 0) {
+    throwArchiveValidationError("after", selected.sourcePath, rebuildSummary.validationErrors)
+  }
 
   return {
     rootPath,
