@@ -96,7 +96,15 @@ function findSidecarForNote(rootPath: string, sidecars: ReturnType<typeof create
   }
 
   for (const sidecarKey of listSidecarKeys(rootPath)) {
-    const sidecar = sidecars.read(sidecarKey)
+    let sidecar: NoteSidecar
+    try {
+      sidecar = sidecars.read(sidecarKey)
+    } catch (error) {
+      if (sidecarKey === key) {
+        throw error
+      }
+      continue
+    }
     if (sidecar.key === key && path.normalize(sidecar.relativePath) === path.normalize(relativePath)) {
       return sidecar
     }

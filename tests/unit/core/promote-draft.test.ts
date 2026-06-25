@@ -44,6 +44,37 @@ async function writeSidecarNote(rootPath: string, input: { key: string; noteId?:
   }, null, 2) + "\n", "utf8")
 }
 
+
+
+test("promoteDraft ignores malformed unrelated sidecars while finding noteId-keyed draft sidecar", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-malformed-sidecar-"))
+  const noteId = "note_promote_valid_after_bad"
+
+  try {
+    await writeSidecarNote(rootPath, { noteId, key: "draft-abc123", title: "Draft ABC", relativePath: "draft/draft-abc123.md", type: "draft" })
+    await writeFile(path.join(rootPath, ".data", "notes", "aaa-malformed.json"), "{ not valid json", "utf8")
+    await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
+
+    const promoted = promoteDraft({
+      override: rootPath,
+      selector: "draft-abc123",
+      destinationFolder: "note/work",
+      title: "Promoted Draft",
+      updatedAt: "2026-06-07T00:00:00.000Z",
+      randomSource: () => 0,
+    })
+
+    assert.equal(promoted.key, "promoted-draft-000000")
+    assert.equal(promoted.relativePath, "note/work/promoted-draft-000000.md")
+    const sidecar = createSidecarRepository(rootPath).readByNoteId(noteId)
+    assert.equal(sidecar.key, "promoted-draft-000000")
+    assert.equal(sidecar.relativePath, "note/work/promoted-draft-000000.md")
+    assert.equal(await readFile(path.join(rootPath, ".data", "notes", "aaa-malformed.json"), "utf8"), "{ not valid json")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("promoteDraft preserves noteId-keyed sidecars while promoting mutable metadata", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-note-id-"))
   const noteId = "note_promote_123"
