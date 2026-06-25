@@ -9,7 +9,7 @@ import { createNoteRepository } from "../storage/note-repository"
 import { serializePlainNote } from "../storage/plain-note"
 import { createSidecarRepository } from "../storage/sidecar-repository"
 import type { NoteSidecar } from "../storage/sidecar-schema"
-import { getDraftNotesPath, getNormalNotesPath } from "../storage/root-layout"
+import { getArchiveNotesPath, getDraftNotesPath, getNormalNotesPath } from "../storage/root-layout"
 import type {
   DownloadNoteBodyResponse,
   PullChangesRequest,
@@ -320,15 +320,13 @@ function findNoteIdByRelativePath(rootPath: string, relativePath: string): strin
 }
 
 function findRawNoteRelativePathByKey(rootPath: string, key: string, allowedRelativePaths: Set<string>): string | null {
-  const normalNotesPath = getNormalNotesPath(rootPath)
-  if (!fs.existsSync(normalNotesPath)) {
-    return null
-  }
-
-  const pending = [normalNotesPath]
+  const pending = [getNormalNotesPath(rootPath), getDraftNotesPath(rootPath), getArchiveNotesPath(rootPath)]
   while (pending.length > 0) {
     const directoryPath = pending.pop()
     if (directoryPath === undefined) {
+      continue
+    }
+    if (!fs.existsSync(directoryPath)) {
       continue
     }
     for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {

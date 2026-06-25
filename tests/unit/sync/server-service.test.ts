@@ -280,8 +280,8 @@ test("server rejects synced renames that collide with raw Markdown note keys", a
         },
       }],
     })
-    mkdirSync(path.join(rootPath, "note", "legacy"), { recursive: true })
-    writeFileSync(path.join(rootPath, "note", "legacy", "raw-collision.md"), "Legacy raw body.\n", "utf8")
+    mkdirSync(path.join(rootPath, "draft"), { recursive: true })
+    writeFileSync(path.join(rootPath, "draft", "raw-collision.md"), "Legacy raw body.\n", "utf8")
 
     const renamed = server.acceptPush({
       workspaceId,
@@ -308,7 +308,7 @@ test("server rejects synced renames that collide with raw Markdown note keys", a
     assert.match(renamed.rejected[0].message, /raw-collision/)
     assert.equal(existsSync(path.join(rootPath, "note", "raw-collision.md")), false)
     assert.equal(readFileSync(path.join(rootPath, "note", "original-raw-collision.md"), "utf8"), "Original body.\n")
-    assert.equal(readFileSync(path.join(rootPath, "note", "legacy", "raw-collision.md"), "utf8"), "Legacy raw body.\n")
+    assert.equal(readFileSync(path.join(rootPath, "draft", "raw-collision.md"), "utf8"), "Legacy raw body.\n")
   })
 })
 

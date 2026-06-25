@@ -9,7 +9,7 @@ import { createReplicaId } from "../platform/ids.js";
 import { assertPathInsideRoot, toRootRelativePath } from "../platform/path-safety.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { serializePlainNote } from "../storage/plain-note.js";
-import { getNormalNotesPath, getStateNotesPath } from "../storage/root-layout.js";
+import { getArchiveNotesPath, getDraftNotesPath, getNormalNotesPath, getStateNotesPath } from "../storage/root-layout.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
 import { createFolderRepository } from "./folder-repository.js";
@@ -188,14 +188,13 @@ function findSidecarOwnerForRelativePath(rootPath, relativePath) {
     return null;
 }
 function findRawNoteRelativePathByKey(rootPath, key, allowedRelativePaths) {
-    const normalNotesPath = getNormalNotesPath(rootPath);
-    if (!fs.existsSync(normalNotesPath)) {
-        return null;
-    }
-    const pending = [normalNotesPath];
+    const pending = [getNormalNotesPath(rootPath), getDraftNotesPath(rootPath), getArchiveNotesPath(rootPath)];
     while (pending.length > 0) {
         const directoryPath = pending.pop();
         if (directoryPath === undefined) {
+            continue;
+        }
+        if (!fs.existsSync(directoryPath)) {
             continue;
         }
         for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {

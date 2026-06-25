@@ -260,7 +260,7 @@ describe("sync client service", () => {
   test("pulled renames reject keys used by raw Markdown notes", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
-      mkdirSync(path.join(rootPath, "note", "legacy"), { recursive: true })
+      mkdirSync(path.join(rootPath, ".data", "archive"), { recursive: true })
       const core = createBlueNoteCore({ rootPath })
       const synced = core.notes.create({
         type: "normal",
@@ -270,7 +270,7 @@ describe("sync client service", () => {
         enqueueAi: false,
         noteIdGenerator: () => "note-synced-raw-original",
       })
-      writeFileSync(path.join(rootPath, "note", "legacy", "raw-collision.md"), "Legacy raw body.\n", "utf8")
+      writeFileSync(path.join(rootPath, ".data", "archive", "raw-collision.md"), "Legacy raw body.\n", "utf8")
       const transport = makeTransport({
         bodies: { [synced.noteId]: "Renamed remote body.\n" },
         pull: (request) => ({
@@ -305,7 +305,7 @@ describe("sync client service", () => {
         /already used by another Markdown note/,
       )
       assert.equal(readFileSync(path.join(rootPath, synced.relativePath), "utf8"), "Original raw body.\n")
-      assert.equal(readFileSync(path.join(rootPath, "note", "legacy", "raw-collision.md"), "utf8"), "Legacy raw body.\n")
+      assert.equal(readFileSync(path.join(rootPath, ".data", "archive", "raw-collision.md"), "utf8"), "Legacy raw body.\n")
       assert.equal(existsSync(path.join(rootPath, "note", "raw-collision.md")), false)
     })
   })
