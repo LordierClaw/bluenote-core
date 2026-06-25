@@ -2,7 +2,7 @@ import { describe, test } from "vitest"
 import assert from "node:assert/strict"
 import os from "node:os"
 import path from "node:path"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 
 import { createBlueNoteCore, createDirtyRecordRepository, createNoteRepository, createSidecarRepository, UsageError } from "@lordierclaw/bluenote-core"
@@ -143,18 +143,19 @@ describe("createBlueNoteCore sync namespace", () => {
     await withTempRoot("bluenote-core-sync-link-sidecarless-noteid-", async (rootPath) => {
       const core = createBlueNoteCore({ rootPath })
       core.init()
-      createNoteRepository(rootPath).create({
-        frontmatter: {
-          id: "sidecarless-legacy",
-          schemaVersion: 1,
-          title: "Sidecarless Legacy",
-          mode: "plain",
-          tags: [],
-          createdAt: "2026-06-01T00:00:00.000Z",
-          updatedAt: "2026-06-01T00:00:00.000Z",
-        },
-        body: "Legacy note body.\n",
-      })
+      await mkdir(path.join(rootPath, "note"), { recursive: true })
+      const legacyNotePath = path.join(rootPath, "note", "sidecarless-legacy.md")
+      writeFileSync(legacyNotePath, `---
+id: sidecarless-legacy
+schemaVersion: 1
+title: Sidecarless Legacy
+mode: plain
+tags: []
+createdAt: 2026-06-01T00:00:00.000Z
+updatedAt: 2026-06-01T00:00:00.000Z
+---
+Legacy note body.
+`, "utf8")
 
       const summary = core.sync.link({
         mode: "seed-empty-server-from-local",
@@ -166,6 +167,8 @@ describe("createBlueNoteCore sync namespace", () => {
       assert.notEqual(seeded[0].entityId, "sidecarless-legacy")
       assert.match(seeded[0].entityId, /^note_/)
       assert.equal(createSidecarRepository(rootPath).read("sidecarless-legacy").noteId, seeded[0].entityId)
+      assert.equal(readFileSync(legacyNotePath, "utf8"), "Legacy note body.\n")
+      assert.equal(core.notes.get("sidecarless-legacy").body, "Legacy note body.\n")
     })
   })
 

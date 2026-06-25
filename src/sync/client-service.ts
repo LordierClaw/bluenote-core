@@ -486,6 +486,20 @@ function hasLocalDirtyRecord(dirty: ReturnType<typeof createDirtyRecordRepositor
   return dirty.listDirtyRecords().some((record) => record.entityType === change.entityType && record.entityId === change.entityId)
 }
 
+function applyPulledChangeBeforeCursorAdvance(
+  rootPath: string,
+  identity: EnsureSyncDatabaseOptions,
+  change: SyncChangeView,
+  transport: SyncTransport,
+  dirty: ReturnType<typeof createDirtyRecordRepository>,
+): boolean {
+  const applied = applyPulledChange(rootPath, identity, change, transport)
+  if (applied && hasLocalDirtyRecord(dirty, change)) {
+    dirty.clearDirtyRecord(change.entityType, change.entityId)
+  }
+  return applied
+}
+
 export function createSyncClientService(options: CreateSyncClientServiceOptions): SyncClientService {
   const rootPath = path.resolve(options.rootPath)
   const identity: EnsureSyncDatabaseOptions = { role: "client", workspaceId: options.workspaceId }
@@ -506,10 +520,7 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
           if (isOwnEcho(change, replicaId)) {
             continue
           }
-          if (hasLocalDirtyRecord(dirty, change)) {
-            continue
-          }
-          if (applyPulledChange(rootPath, identity, change, options.transport)) {
+          if (applyPulledChangeBeforeCursorAdvance(rootPath, identity, change, options.transport, dirty)) {
             needsRebuild = true
           }
         }
@@ -541,10 +552,7 @@ export function createSyncClientService(options: CreateSyncClientServiceOptions)
             if (isOwnEcho(change, replicaId)) {
               continue
             }
-            if (hasLocalDirtyRecord(dirty, change)) {
-              continue
-            }
-            if (applyPulledChange(rootPath, identity, change, options.transport)) {
+            if (applyPulledChangeBeforeCursorAdvance(rootPath, identity, change, options.transport, dirty)) {
               needsRebuild = true
             }
           }

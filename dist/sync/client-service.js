@@ -423,6 +423,13 @@ function isOwnEcho(change, replicaId) {
 function hasLocalDirtyRecord(dirty, change) {
     return dirty.listDirtyRecords().some((record) => record.entityType === change.entityType && record.entityId === change.entityId);
 }
+function applyPulledChangeBeforeCursorAdvance(rootPath, identity, change, transport, dirty) {
+    const applied = applyPulledChange(rootPath, identity, change, transport);
+    if (applied && hasLocalDirtyRecord(dirty, change)) {
+        dirty.clearDirtyRecord(change.entityType, change.entityId);
+    }
+    return applied;
+}
 export function createSyncClientService(options) {
     const rootPath = path.resolve(options.rootPath);
     const identity = { role: "client", workspaceId: options.workspaceId };
@@ -441,10 +448,7 @@ export function createSyncClientService(options) {
                     if (isOwnEcho(change, replicaId)) {
                         continue;
                     }
-                    if (hasLocalDirtyRecord(dirty, change)) {
-                        continue;
-                    }
-                    if (applyPulledChange(rootPath, identity, change, options.transport)) {
+                    if (applyPulledChangeBeforeCursorAdvance(rootPath, identity, change, options.transport, dirty)) {
                         needsRebuild = true;
                     }
                 }
@@ -474,10 +478,7 @@ export function createSyncClientService(options) {
                         if (isOwnEcho(change, replicaId)) {
                             continue;
                         }
-                        if (hasLocalDirtyRecord(dirty, change)) {
-                            continue;
-                        }
-                        if (applyPulledChange(rootPath, identity, change, options.transport)) {
+                        if (applyPulledChangeBeforeCursorAdvance(rootPath, identity, change, options.transport, dirty)) {
                             needsRebuild = true;
                         }
                     }

@@ -1,8 +1,9 @@
 import path from "node:path";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { APP_STATE_NOTES_DIRECTORY } from "../config/root.js";
 import { createNoteDescription } from "../domain/note-description.js";
 import { createNoteId } from "../platform/ids.js";
+import { serializePlainNote } from "../storage/plain-note.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
 import { createFolderRepository } from "./folder-repository.js";
@@ -21,6 +22,7 @@ function sidecarTypeForNote(note) {
 function writeStableSidecarForLegacyNote(rootPath, note) {
     const sidecars = createSidecarRepository(rootPath);
     const noteId = createNoteId();
+    const notePath = path.join(rootPath, note.sourcePath);
     sidecars.write({
         type: sidecarTypeForNote(note),
         noteId,
@@ -33,6 +35,7 @@ function writeStableSidecarForLegacyNote(rootPath, note) {
         archivedAt: note.frontmatter.archivedAt ?? null,
         namingVersion: 1,
     });
+    writeFileSync(notePath, serializePlainNote({ sourcePath: note.sourcePath, body: note.body }), "utf8");
     return noteId;
 }
 export function getNoteSyncEntityId(rootPath, note) {

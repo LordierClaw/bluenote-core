@@ -1,10 +1,11 @@
 import path from "node:path"
-import { existsSync, readdirSync, rmSync } from "node:fs"
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 
 import { APP_STATE_NOTES_DIRECTORY } from "../config/root"
 import { createNoteDescription } from "../domain/note-description"
 import { createNoteId } from "../platform/ids"
 import type { ParsedNote } from "../storage/note-schema"
+import { serializePlainNote } from "../storage/plain-note"
 import type { NoteSidecar } from "../storage/sidecar-schema"
 import { createSidecarRepository } from "../storage/sidecar-repository"
 import { createDirtyRecordRepository } from "./dirty-repository"
@@ -52,6 +53,7 @@ function sidecarTypeForNote(note: Pick<ParsedNote, "frontmatter" | "sourcePath">
 function writeStableSidecarForLegacyNote(rootPath: string, note: Pick<ParsedNote, "frontmatter" | "sourcePath" | "body">): string {
   const sidecars = createSidecarRepository(rootPath)
   const noteId = createNoteId()
+  const notePath = path.join(rootPath, note.sourcePath)
   sidecars.write({
     type: sidecarTypeForNote(note),
     noteId,
@@ -64,6 +66,7 @@ function writeStableSidecarForLegacyNote(rootPath: string, note: Pick<ParsedNote
     archivedAt: note.frontmatter.archivedAt ?? null,
     namingVersion: 1,
   })
+  writeFileSync(notePath, serializePlainNote({ sourcePath: note.sourcePath, body: note.body }), "utf8")
   return noteId
 }
 

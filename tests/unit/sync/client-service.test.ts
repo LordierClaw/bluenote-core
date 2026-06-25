@@ -286,7 +286,7 @@ describe("sync client service", () => {
     })
   })
 
-  test("remote pulls do not clear or overwrite a locally dirty note before push", async () => {
+  test("remote pulls resolve matching local dirty notes before advancing and pushing", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
       mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
@@ -330,26 +330,19 @@ describe("sync client service", () => {
             metadata: { key: note.key, relativePath: note.relativePath, title: "Server Title", updatedAt: "2026-06-24T01:00:00.000Z" },
           }],
         }),
-        push: (request) => ({
-          accepted: request.records.map((record) => ({ entityType: record.entityType, entityId: record.entityId, serverRevision: 3 })),
-          replacedByServer: [],
-          rejected: [],
-          serverSequence: request.baseSequence,
-        }),
+        push: () => assert.fail("dirty conflict should be resolved by the pulled server change before push"),
       })
 
       const summary = createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
 
-      assert.deepEqual(transport.calls, ["pull", "push"])
-      assert.equal(transport.pushes.length, 1)
-      assert.equal(transport.pushes[0].records[0].entityId, note.noteId)
-      assert.equal(transport.pushes[0].noteBodies?.[note.noteId], "Local dirty content must be pushed.\n")
-      assert.deepEqual(summary, { status: "synced", pushed: 1, pulled: 1 })
+      assert.deepEqual(transport.calls, ["pull", `download:${note.noteId}`])
+      assert.equal(transport.pushes.length, 0)
+      assert.deepEqual(summary, { status: "synced", pushed: 0, pulled: 1 })
       assert.deepEqual(dirty.listDirtyRecords(), [])
       const updated = core.notes.get(note.key)
-      assert.equal(updated.title, "Local Title")
-      assert.equal(updated.body, "Local dirty content must be pushed.\n")
-      assert.equal(readFileSync(note.notePath, "utf8").includes("Server body must not overwrite"), false)
+      assert.equal(updated.title, "Server Title")
+      assert.equal(updated.body, "Server body must not overwrite local dirty content.\n")
+      assert.equal(readFileSync(note.notePath, "utf8"), "Server body must not overwrite local dirty content.\n")
       assert.deepEqual(listRecoveryOrConflictFiles(rootPath), [])
     })
   })
@@ -773,7 +766,7 @@ describe("sync client service", () => {
     })
   })
 
-  test("pulled folder changes do not clear matching local dirty folder records before push", async () => {
+  test("pulled folder changes clear matching local dirty folder records before push", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
       const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
@@ -800,24 +793,13 @@ describe("sync client service", () => {
             metadata: { relativePath: "note/projects" },
           }],
         }),
-        push: (request) => ({
-          accepted: request.records.map((record) => ({ entityType: record.entityType, entityId: record.entityId, serverRevision: 2 })),
-          replacedByServer: [],
-          rejected: [],
-          serverSequence: request.baseSequence,
-        }),
+        push: () => assert.fail("dirty folder conflict should be resolved by the pulled server change before push"),
       })
 
-      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 1, pulled: 1 })
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
       assert.equal(dirty.listDirtyRecords().length, 0)
-      assert.equal(transport.pushes.length, 1)
-      assert.deepEqual(transport.pushes[0].records, [{
-        entityType: "folder",
-        entityId: "note/projects",
-        dirtyType: "folder-upsert",
-        clientUpdatedAt: "2026-06-24T00:00:00.000Z",
-        metadata: { relativePath: "note/projects" },
-      }])
+      assert.equal(transport.pushes.length, 0)
+      assert.equal(existsSync(path.join(rootPath, "note", "projects")), true)
     })
   })
 
