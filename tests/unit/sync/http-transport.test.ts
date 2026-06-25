@@ -138,7 +138,7 @@ describe("sync HTTP transport", () => {
     const pullRequests: PullChangesRequest[] = []
     const pushRequests: Array<PushRequest & { noteBodies?: Record<string, string> }> = []
     const uploads: UploadNoteBodyRequest[] = []
-    const downloads: Array<{ noteId: string; workspaceId?: string }> = []
+    const downloads: Array<{ noteId: string; workspaceId?: string; sequence?: number; serverRevision?: number }> = []
     const statuses: Array<{ workspaceId?: string } | undefined> = []
     const service: SyncHttpService = {
       getChanges(request) {
@@ -171,7 +171,7 @@ describe("sync HTTP transport", () => {
         return { noteId: request.noteId, contentHash: request.contentHash, byteLength: request.byteLength, accepted: true }
       },
       downloadNoteBody(noteId, request) {
-        downloads.push({ noteId, workspaceId: request?.workspaceId })
+        downloads.push({ noteId, workspaceId: request?.workspaceId, sequence: request?.sequence, serverRevision: request?.serverRevision })
         return { workspaceId: "workspace-a", noteId, body: "Downloaded body.\n" }
       },
       status(request) {
@@ -195,9 +195,9 @@ describe("sync HTTP transport", () => {
     assert.equal(upload.status, 200)
     assert.equal(uploads.length, 1)
 
-    const download = await handlers.handle({ method: "GET", path: "/sync/v1/bodies/note-a?workspaceId=workspace-a", headers: {} })
+    const download = await handlers.handle({ method: "GET", path: "/sync/v1/bodies/note-a?workspaceId=workspace-a&sequence=4&serverRevision=2", headers: {} })
     assert.deepEqual(download.body, { workspaceId: "workspace-a", noteId: "note-a", body: "Downloaded body.\n" })
-    assert.deepEqual(downloads, [{ noteId: "note-a", workspaceId: "workspace-a" }])
+    assert.deepEqual(downloads, [{ noteId: "note-a", workspaceId: "workspace-a", sequence: 4, serverRevision: 2 }])
 
     const status = await handlers.handle({ method: "GET", path: "/sync/v1/status?workspaceId=workspace-a", headers: {} })
     assert.deepEqual(status.body, { workspaceId: "workspace-a", ok: true })
@@ -208,6 +208,11 @@ describe("sync HTTP transport", () => {
 
     const malformedDownload = await handlers.handle({ method: "GET", path: "/sync/v1/bodies/%E0%A4%A?workspaceId=workspace-a", headers: {} })
     assert.equal(malformedDownload.status, 400)
+
+    const malformedSequenceDownload = await handlers.handle({ method: "GET", path: "/sync/v1/bodies/note-a?workspaceId=workspace-a&sequence=abc", headers: {} })
+    assert.equal(malformedSequenceDownload.status, 400)
+    const malformedRevisionDownload = await handlers.handle({ method: "GET", path: "/sync/v1/bodies/note-a?workspaceId=workspace-a&serverRevision=-1", headers: {} })
+    assert.equal(malformedRevisionDownload.status, 400)
   })
 
   test("redacts credentials and query tokens in URL helpers and HTTP errors", async () => {

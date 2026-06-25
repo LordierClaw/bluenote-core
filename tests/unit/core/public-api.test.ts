@@ -7,9 +7,11 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import {
   createBlueNoteCore,
   createDirtyRecordRepository,
+  createSyncLogWriter,
   createSyncServerService,
   ensureSyncDatabase,
   getSyncDatabasePath,
+  redactSyncLogValue,
   type SyncLinkOptions,
   type SyncLinkSummary,
   type SyncNowSummary,
@@ -135,5 +137,11 @@ describe("@lordierclaw/bluenote-core public API", () => {
     assert.equal(typeof ensureSyncDatabase, "function")
     assert.equal(typeof getSyncDatabasePath, "function")
     assert.equal(typeof createDirtyRecordRepository, "function")
+    assert.equal(typeof createSyncLogWriter, "function")
+    const redactedLogValue = redactSyncLogValue({ token: "secret", safe: "value" })
+    assert.equal(typeof redactedLogValue, "object")
+    assert.equal(Array.isArray(redactedLogValue), false)
+    assert.notEqual(redactedLogValue, null)
+    assert.equal((redactedLogValue as { token?: string }).token, "[redacted]")
   })
 })

@@ -87,6 +87,7 @@ export * from "./sync/types"
 export * from "./sync/protocol"
 export * from "./sync/server-service"
 export * from "./sync/http-transport"
+export * from "./sync/sync-log"
 export * from "./sync/dirty-repository"
 export * from "./sync/folder-repository"
 export {

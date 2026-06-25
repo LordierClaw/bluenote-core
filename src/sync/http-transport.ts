@@ -264,7 +264,12 @@ function optionalNonNegativeIntegerQuery(query: URLSearchParams, key: string): n
     return undefined
   }
   const value = Number(raw)
-  return Number.isInteger(value) && value >= 0 ? value : Number.NaN
+  if (!Number.isInteger(value) || value < 0) {
+    throw new UsageError(`Invalid sync HTTP query '${key}'.`, {
+      hint: `${key} must be a non-negative integer when provided.`,
+    })
+  }
+  return value
 }
 
 function workspaceFromPath(path: string): { workspaceId?: string; sequence?: number; serverRevision?: number } | undefined {
@@ -349,7 +354,13 @@ export function createSyncHttpHandlers(service: SyncHttpService): SyncHttpHandle
       }
       if (noteId !== null) {
         if (method !== "GET") return methodNotAllowed()
-        return jsonResponse(await service.downloadNoteBody(noteId, workspaceFromPath(request.path)))
+        let downloadOptions: { workspaceId?: string; sequence?: number; serverRevision?: number } | undefined
+        try {
+          downloadOptions = workspaceFromPath(request.path)
+        } catch {
+          return badRequest("Invalid body download query.")
+        }
+        return jsonResponse(await service.downloadNoteBody(noteId, downloadOptions))
       }
 
       if (path === "/sync/v1/status") {

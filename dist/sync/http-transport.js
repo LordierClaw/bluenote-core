@@ -172,7 +172,12 @@ function optionalNonNegativeIntegerQuery(query, key) {
         return undefined;
     }
     const value = Number(raw);
-    return Number.isInteger(value) && value >= 0 ? value : Number.NaN;
+    if (!Number.isInteger(value) || value < 0) {
+        throw new UsageError(`Invalid sync HTTP query '${key}'.`, {
+            hint: `${key} must be a non-negative integer when provided.`,
+        });
+    }
+    return value;
 }
 function workspaceFromPath(path) {
     const queryStart = path.indexOf("?");
@@ -256,7 +261,14 @@ export function createSyncHttpHandlers(service) {
             if (noteId !== null) {
                 if (method !== "GET")
                     return methodNotAllowed();
-                return jsonResponse(await service.downloadNoteBody(noteId, workspaceFromPath(request.path)));
+                let downloadOptions;
+                try {
+                    downloadOptions = workspaceFromPath(request.path);
+                }
+                catch {
+                    return badRequest("Invalid body download query.");
+                }
+                return jsonResponse(await service.downloadNoteBody(noteId, downloadOptions));
             }
             if (path === "/sync/v1/status") {
                 if (method !== "GET")
