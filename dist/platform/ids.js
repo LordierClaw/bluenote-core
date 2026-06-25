@@ -10,4 +10,7 @@ export function createWorkspaceId() {
 export function createNoteId() {
     return `note_${randomUUID()}`;
 }
+export function createReplicaId() {
+    return `replica_${randomUUID()}`;
+}
 //# sourceMappingURL=ids.js.map

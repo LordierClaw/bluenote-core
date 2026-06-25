@@ -17,3 +17,7 @@ export function createWorkspaceId(): string {
 export function createNoteId(): string {
   return `note_${randomUUID()}`
 }
+
+export function createReplicaId(): string {
+  return `replica_${randomUUID()}`
+}

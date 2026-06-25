@@ -4,6 +4,7 @@ import fs from "node:fs"
 import { createNoteDescription } from "../domain/note-description"
 import { UsageError } from "../core/errors"
 import { rebuildIndexes } from "../core/rebuild-indexes"
+import { createReplicaId } from "../platform/ids"
 import { assertPathInsideRoot, toRootRelativePath } from "../platform/path-safety"
 import { createNoteRepository } from "../storage/note-repository"
 import { serializePlainNote } from "../storage/plain-note"
@@ -158,6 +159,20 @@ function writeReplicaProgress(rootPath: string, identity: EnsureSyncDatabaseOpti
       `,
       [replicaId, identity.workspaceId, new Date().toISOString(), sequence, pushedAt ?? null],
     )
+  }, { save: true })
+}
+
+function readOrCreateLocalReplicaId(rootPath: string, identity: EnsureSyncDatabaseOptions): string {
+  return withSyncDatabase(rootPath, identity, (handle) => {
+    const rows = handle.db.exec("SELECT value FROM sync_meta WHERE key = 'localReplicaId'")[0]?.values ?? []
+    const existing = rows[0]?.[0]
+    if (typeof existing === "string" && existing.trim().length > 0) {
+      return existing
+    }
+
+    const replicaId = createReplicaId()
+    handle.db.run("INSERT INTO sync_meta (key, value) VALUES ('localReplicaId', ?)", [replicaId])
+    return replicaId
   }, { save: true })
 }
 
@@ -456,8 +471,8 @@ function hasLocalDirtyRecord(dirty: ReturnType<typeof createDirtyRecordRepositor
 
 export function createSyncClientService(options: CreateSyncClientServiceOptions): SyncClientService {
   const rootPath = path.resolve(options.rootPath)
-  const replicaId = options.replicaId ?? "local"
   const identity: EnsureSyncDatabaseOptions = { role: "client", workspaceId: options.workspaceId }
+  const replicaId = options.replicaId ?? readOrCreateLocalReplicaId(rootPath, identity)
   const pullLimit = options.pullLimit ?? 100
 
   return {

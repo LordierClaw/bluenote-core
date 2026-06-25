@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { createNoteDescription } from "../domain/note-description.js";
 import { UsageError } from "../core/errors.js";
 import { rebuildIndexes } from "../core/rebuild-indexes.js";
+import { createReplicaId } from "../platform/ids.js";
 import { assertPathInsideRoot, toRootRelativePath } from "../platform/path-safety.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { serializePlainNote } from "../storage/plain-note.js";
@@ -117,6 +118,18 @@ function writeReplicaProgress(rootPath, identity, replicaId, sequence, pushedAt)
           lastPushedAt = COALESCE(excluded.lastPushedAt, replicas.lastPushedAt),
           status = 'active'
       `, [replicaId, identity.workspaceId, new Date().toISOString(), sequence, pushedAt ?? null]);
+    }, { save: true });
+}
+function readOrCreateLocalReplicaId(rootPath, identity) {
+    return withSyncDatabase(rootPath, identity, (handle) => {
+        const rows = handle.db.exec("SELECT value FROM sync_meta WHERE key = 'localReplicaId'")[0]?.values ?? [];
+        const existing = rows[0]?.[0];
+        if (typeof existing === "string" && existing.trim().length > 0) {
+            return existing;
+        }
+        const replicaId = createReplicaId();
+        handle.db.run("INSERT INTO sync_meta (key, value) VALUES ('localReplicaId', ?)", [replicaId]);
+        return replicaId;
     }, { save: true });
 }
 function readSidecarIfExists(rootPath, noteId) {
@@ -394,8 +407,8 @@ function hasLocalDirtyRecord(dirty, change) {
 }
 export function createSyncClientService(options) {
     const rootPath = path.resolve(options.rootPath);
-    const replicaId = options.replicaId ?? "local";
     const identity = { role: "client", workspaceId: options.workspaceId };
+    const replicaId = options.replicaId ?? readOrCreateLocalReplicaId(rootPath, identity);
     const pullLimit = options.pullLimit ?? 100;
     return {
         syncNow() {

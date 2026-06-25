@@ -117,6 +117,44 @@ describe("sync client service", () => {
     })
   })
 
+  test("default replica IDs are unique per root instead of treating sourceReplicaId local as an own echo", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        bodies: { "note-from-default-local": "Remote body from another default client.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "note",
+            entityId: "note-from-default-local",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Default Local",
+            relativePath: "note/default-local.md",
+            bodyAvailable: true,
+            sourceReplicaId: "local",
+            metadata: {
+              key: "default-local",
+              relativePath: "note/default-local.md",
+              title: "Default Local",
+              createdAt: "2026-06-24T01:00:00.000Z",
+              updatedAt: "2026-06-24T01:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.deepEqual(transport.calls, ["pull", "download:note-from-default-local"])
+      assert.equal(readFileSync(path.join(rootPath, "note", "default-local.md"), "utf8"), "Remote body from another default client.\n")
+    })
+  })
+
   test("sync cycle surfaces rejected pushes and keeps dirty records pending", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
