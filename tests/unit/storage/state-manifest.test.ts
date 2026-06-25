@@ -63,6 +63,24 @@ test("writeStateManifest default writes preserve an existing workspaceId", async
   }
 })
 
+
+test("writeStateManifest fills workspaceId for explicit schema 3 manifests", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-state-manifest-explicit-schema-3-"))
+
+  try {
+    await writeStateManifest(rootPath, { schemaVersion: STORAGE_SCHEMA_VERSION })
+    const manifest = readStateManifest(rootPath)
+    assert.equal(manifest.schemaVersion, STORAGE_SCHEMA_VERSION)
+    assert.equal(typeof manifest.workspaceId, "string")
+    assert.notEqual(manifest.workspaceId, "")
+
+    await writeStateManifest(rootPath, { schemaVersion: STORAGE_SCHEMA_VERSION, workspaceId: "" })
+    assert.deepEqual(readStateManifest(rootPath), { schemaVersion: STORAGE_SCHEMA_VERSION, workspaceId: manifest.workspaceId })
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("readStateManifest accepts schema 2 manifests without workspaceId as legacy standalone manifests", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-state-manifest-schema-2-"))
 

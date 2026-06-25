@@ -953,6 +953,11 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
       if (!Number.isInteger(request?.sequence ?? 0) || !Number.isInteger(request?.serverRevision ?? 0)) {
         throw new UsageError(`Invalid sync body download revision for note '${noteId}'.`)
       }
+      if ((request?.sequence === undefined) !== (request?.serverRevision === undefined)) {
+        throw new UsageError(`Incomplete sync body download revision for note '${noteId}'.`, {
+          hint: "Pass both sequence and serverRevision, or omit both to download the latest body.",
+        })
+      }
       if (
         request?.sequence !== undefined &&
         request?.serverRevision !== undefined &&

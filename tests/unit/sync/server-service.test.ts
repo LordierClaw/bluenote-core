@@ -288,6 +288,14 @@ test("server binds body downloads to the requested revision", async () => {
       sequence: pulled.sequence,
       serverRevision: pulled.serverRevision,
     }), /revision/i)
+    assert.throws(() => server.downloadNoteBody("note-race", {
+      workspaceId,
+      sequence: pulled.sequence,
+    }), /Incomplete sync body download revision/)
+    assert.throws(() => server.downloadNoteBody("note-race", {
+      workspaceId,
+      serverRevision: pulled.serverRevision,
+    }), /Incomplete sync body download revision/)
   })
 })
 

@@ -22,6 +22,12 @@ function readExistingWorkspaceId(rootPath) {
 }
 function createStateManifestForWrite(rootPath, manifest) {
     if (manifest !== undefined) {
+        if (manifest.schemaVersion >= 3 && (typeof manifest.workspaceId !== "string" || manifest.workspaceId.length === 0)) {
+            return {
+                ...manifest,
+                workspaceId: readExistingWorkspaceId(rootPath) ?? createWorkspaceId(),
+            };
+        }
         return manifest;
     }
     const existingWorkspaceId = readExistingWorkspaceId(rootPath);
