@@ -312,6 +312,37 @@ test("server rejects synced renames that collide with raw Markdown note keys", a
   })
 })
 
+
+test("server rejects future pull cursors", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "future-pull-note": "Body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "future-pull-note",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "future-pull-note",
+          title: "Future Pull Note",
+          relativePath: "note/future-pull-note.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }],
+    })
+
+    assert.throws(
+      () => server.getChanges({ workspaceId, sinceSequence: 10, limit: 10 }),
+      /Invalid sync pull sinceSequence 10; server is at sequence 1/,
+    )
+  })
+})
+
 test("server rejects future push cursors before mutating note files", async () => {
   await withRoot((rootPath) => {
     const server = createSyncServerService({ rootPath, workspaceId })

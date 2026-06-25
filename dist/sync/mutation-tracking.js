@@ -5,6 +5,7 @@ import { createNoteDescription } from "../domain/note-description.js";
 import { createNoteId } from "../platform/ids.js";
 import { serializePlainNote } from "../storage/plain-note.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
+import { UsageError } from "../core/errors.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
 import { createFolderRepository } from "./folder-repository.js";
 import { getSyncClientRuntimeMode } from "./runtime-mode.js";
@@ -157,8 +158,11 @@ export function recordSyncMutationBestEffort(rootPath, input) {
             lastError: null,
         });
     }
-    catch {
-        // Sync tracking is best-effort after local note mutations have already been persisted.
+    catch (error) {
+        throw new UsageError("Could not record sync dirty state for local mutation.", {
+            hint: "The local note change was written, but sync-client tracking failed. Repair .data/sync, then edit or mark the note dirty again before relying on sync.",
+            cause: error,
+        });
     }
 }
 //# sourceMappingURL=mutation-tracking.js.map

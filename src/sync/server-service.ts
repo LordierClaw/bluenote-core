@@ -946,6 +946,12 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
       assertValidPullRequest(request)
       assertWorkspace(options.workspaceId, request.workspaceId)
       return withSyncDatabase(rootPath, dbIdentity, (handle) => {
+        const currentServerSequence = latestServerSequence(handle)
+        if (request.sinceSequence > currentServerSequence) {
+          throw new UsageError(`Invalid sync pull sinceSequence ${request.sinceSequence}; server is at sequence ${currentServerSequence}.`, {
+            hint: "Reset the local sync cursor or relink this workspace before pulling again.",
+          })
+        }
         const rows = handle.db.exec(
           `
             SELECT sequence, entityType, entityId, changeType, serverRevision, changedAt, title, relativePath, bodyAvailable, metadataJson, sourceReplicaId

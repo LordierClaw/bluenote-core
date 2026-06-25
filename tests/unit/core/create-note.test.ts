@@ -1,5 +1,6 @@
 import { test } from "vitest"
 import assert from "node:assert/strict"
+import { existsSync } from "node:fs"
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -95,6 +96,31 @@ test("createNote marks the new note dirty in explicit sync-client mode", async (
   })
 })
 
+
+
+test("createNote surfaces sync-client dirty tracking failures", async () => {
+  await withTempRoot("bluenote-create-note-sync-dirty-failure-", async (rootPath) => {
+    await enableSyncClientMode(rootPath)
+    await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
+
+    assert.throws(
+      () => createNote({
+        override: rootPath,
+        type: "normal",
+        title: "Dirty Failure",
+        body: "Dirty failure body.\n",
+        destinationFolder: "note",
+        enqueueAi: false,
+        noteIdGenerator: () => "note_dirty_failure",
+        clock: fixedClock("2026-06-06T12:00:00.000Z"),
+      }),
+      /Could not record sync dirty state for local mutation/,
+    )
+    assert.equal(existsSync(path.join(rootPath, "note", "dirty-failure.md")), false)
+    await rm(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true, force: true })
+    assert.deepEqual(listDirtyRecords(rootPath), [])
+  })
+})
 
 test("createNote suppresses local AI enqueueing in sync-client mode", async () => {
   await withTempRoot("bluenote-create-note-sync-client-no-local-ai-", async (rootPath) => {
@@ -195,22 +221,24 @@ test("createNote records sync dirty state before post-create rebuild validation 
   })
 })
 
-test("createNote still writes the note if sync dirty bookkeeping is temporarily unavailable", async () => {
+test("createNote fails when sync dirty bookkeeping is temporarily unavailable", async () => {
   await withTempRoot("bluenote-create-note-sync-dirty-failure-", async (rootPath) => {
     await enableSyncClientMode(rootPath)
     await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
 
-    const created = createNote({
-      override: rootPath,
-      type: "draft",
-      title: "Retry Later",
-      body: "Local write must succeed.\n",
-      noteIdGenerator: () => "note_dirty_retry_later",
-      randomSource: () => 46655,
-      clock: fixedClock("2026-06-06T12:00:00.000Z"),
-    })
-
-    assert.equal(await readFile(created.notePath, "utf8"), "Local write must succeed.\n")
+    assert.throws(
+      () => createNote({
+        override: rootPath,
+        type: "draft",
+        title: "Retry Later",
+        body: "Local write must not be reported as synced.\n",
+        noteIdGenerator: () => "note_dirty_retry_later",
+        randomSource: () => 46655,
+        clock: fixedClock("2026-06-06T12:00:00.000Z"),
+      }),
+      /Could not record sync dirty state for local mutation/,
+    )
+    assert.equal(await readFile(path.join(rootPath, "draft", "retry-later-000zzz.md"), "utf8"), "Local write must not be reported as synced.\n")
   })
 })
 
