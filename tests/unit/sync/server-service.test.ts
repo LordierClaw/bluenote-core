@@ -135,7 +135,15 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
       byteLength: 29,
     })
     assert.throws(() => server.downloadNoteBody("note-1", { workspaceId: "other-workspace" }), /workspaceId mismatch/)
-    assert.throws(() => server.downloadNoteBody("note-1"), /workspaceId mismatch/)
+    assert.deepEqual(server.downloadNoteBody("note-1"), {
+      workspaceId,
+      noteId: "note-1",
+      sequence: 1,
+      serverRevision: 1,
+      body: "# Body\n\nHello from a client.\n",
+      contentHash: "sha256:client-body",
+      byteLength: 29,
+    })
   })
 })
 

@@ -982,7 +982,9 @@ export function createSyncServerService(options: CreateSyncServerServiceOptions)
     },
 
     downloadNoteBody(noteId, request) {
-      assertWorkspace(options.workspaceId, request?.workspaceId)
+      if (request?.workspaceId !== undefined) {
+        assertWorkspace(options.workspaceId, request.workspaceId)
+      }
       const sidecar = createSidecarRepository(rootPath).readByNoteId(noteId)
       const notePath = assertPathInsideRoot(rootPath, path.join(rootPath, sidecar.relativePath))
       assertPathAndParentsAreNotSymlinks(rootPath, notePath)

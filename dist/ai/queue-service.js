@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { SelectorNotFoundError } from "../core/errors.js";
+import { SelectorNotFoundError, UsageError } from "../core/errors.js";
 import { selectNote } from "../core/select-note.js";
 import { systemClock } from "../platform/clock.js";
 import { createNoteRepository } from "../storage/note-repository.js";
+import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { createAiQueueRepository } from "./queue-repository.js";
 export function hashDescribeNoteContent(input) {
     const canonicalInput = JSON.stringify({
@@ -112,6 +113,15 @@ export function dropDescribeNoteJobIfNoteMissing(rootPath, job) {
     }
     catch (error) {
         if (error instanceof SelectorNotFoundError) {
+            return removeDescribeNoteJob(rootPath, job.key);
+        }
+        throw error;
+    }
+    try {
+        createSidecarRepository(rootPath).read(job.key);
+    }
+    catch (error) {
+        if (error instanceof UsageError && /Could not read sidecar/.test(error.message)) {
             return removeDescribeNoteJob(rootPath, job.key);
         }
         throw error;
