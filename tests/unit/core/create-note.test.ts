@@ -7,7 +7,8 @@ import path from "node:path"
 import { UsageError } from "../../../src/core/errors"
 import { createNote } from "../../../src/core/create-note"
 import type { Clock } from "../../../src/platform/clock"
-import { getStateNotesPath } from "../../../src/storage/root-layout"
+import { getAiQueuePath, getStateNotesPath } from "../../../src/storage/root-layout"
+import { createAiConfigRepository } from "../../../src/ai/config-repository"
 import { enableSyncClientMode, listDirtyRecords, withTempRoot } from "./sync-dirty-test-helpers"
 
 function fixedClock(isoTimestamp: string): Clock {
@@ -91,6 +92,35 @@ test("createNote marks the new note dirty in explicit sync-client mode", async (
         },
       },
     ])
+  })
+})
+
+
+test("createNote suppresses local AI enqueueing in sync-client mode", async () => {
+  await withTempRoot("bluenote-create-note-sync-client-no-local-ai-", async (rootPath) => {
+    await enableSyncClientMode(rootPath)
+    createAiConfigRepository(rootPath).write({
+      version: 1,
+      enabled: true,
+      provider: "openai-compatible",
+      baseUrl: "https://ai.example.test/v1",
+      apiKey: "test-key",
+      model: "test-model",
+      logging: { usage: false, conversations: false, results: false },
+    })
+
+    createNote({
+      override: rootPath,
+      type: "draft",
+      title: "Synced AI Draft",
+      body: "Do not enqueue local AI in sync-client mode.\n",
+      noteIdGenerator: () => "note_sync_no_local_ai",
+      randomSource: () => 46655,
+      clock: fixedClock("2026-06-06T12:00:00.000Z"),
+    })
+
+    await assert.rejects(access(getAiQueuePath(rootPath)))
+    assert.equal(listDirtyRecords(rootPath).some((record) => record.entityId === "note_sync_no_local_ai"), true)
   })
 })
 

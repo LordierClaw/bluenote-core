@@ -12,6 +12,7 @@ import { createNoteRepository } from "../storage/note-repository.js";
 import { ensureManagedRoot, getStateNotesPath } from "../storage/root-layout.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
+import { readSyncRuntimeMode } from "../sync/runtime-mode.js";
 const STORAGE_SAFE_NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 function listExistingCreateKeys(rootPath, repository) {
     const existingKeys = new Set(repository.listNotePaths().map((record) => path.basename(record.relativePath, ".md")));
@@ -42,6 +43,14 @@ function enqueueAiDescriptionAfterCreate(rootPath, input) {
         body: input.body,
         currentDescription: input.description,
     }, { clock: input.clock, warn: (message) => console.warn(message) });
+}
+function shouldEnqueueLocalAiDescription(rootPath) {
+    try {
+        return readSyncRuntimeMode(rootPath).mode !== "sync-client";
+    }
+    catch {
+        return true;
+    }
 }
 export function createNote(options) {
     const rootPath = ensureManagedRoot(resolveBlueNoteRoot(options));
@@ -123,7 +132,7 @@ export function createNote(options) {
             hint: "Run bn rebuild after fixing the reported validation errors.",
         });
     }
-    if (options.enqueueAi !== false) {
+    if (options.enqueueAi !== false && shouldEnqueueLocalAiDescription(rootPath)) {
         enqueueAiDescriptionAfterCreate(rootPath, {
             key,
             title,

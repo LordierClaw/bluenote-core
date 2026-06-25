@@ -31,7 +31,9 @@ function joinBaseUrl(baseUrl, endpoint) {
     const endpointUrl = new URL(endpoint, "http://bluenote.local");
     const basePath = parsed.pathname.replace(/\/+$/, "");
     parsed.pathname = `${basePath}/${endpointUrl.pathname.replace(/^\/+/, "")}`;
-    parsed.search = endpointUrl.search;
+    for (const [key, value] of endpointUrl.searchParams) {
+        parsed.searchParams.set(key, value);
+    }
     return parsed.toString();
 }
 function logUrlWithBaseSecrets(baseUrl, requestUrl) {

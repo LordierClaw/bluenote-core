@@ -128,10 +128,13 @@ describe("sync HTTP transport", () => {
       ["GET", "/base/sync/v1/status"],
     ])
     for (const call of calls) {
+      assert.equal(new URL(call.url).searchParams.get("token"), "secret")
       const headers = new Headers(call.init.headers)
       assert.equal(headers.get("authorization"), null)
       assert.equal(headers.get("content-type"), call.init.method === "GET" ? null : "application/json")
     }
+    assert.equal(new URL(calls[3].url).searchParams.get("workspaceId"), "workspace-a")
+    assert.equal(new URL(calls[4].url).searchParams.get("workspaceId"), "workspace-a")
   })
 
   test("server handlers route JSON requests without inlining bodies in change lists", async () => {

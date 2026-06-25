@@ -13,6 +13,7 @@ import { createNoteRepository } from "../storage/note-repository"
 import { ensureManagedRoot, getStateNotesPath } from "../storage/root-layout"
 import { createSidecarRepository } from "../storage/sidecar-repository"
 import { recordSyncMutationBestEffort } from "../sync/mutation-tracking"
+import { readSyncRuntimeMode } from "../sync/runtime-mode"
 
 const STORAGE_SAFE_NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 
@@ -73,6 +74,14 @@ function enqueueAiDescriptionAfterCreate(
     body: input.body,
     currentDescription: input.description,
   }, { clock: input.clock, warn: (message) => console.warn(message) })
+}
+
+function shouldEnqueueLocalAiDescription(rootPath: string): boolean {
+  try {
+    return readSyncRuntimeMode(rootPath).mode !== "sync-client"
+  } catch {
+    return true
+  }
 }
 
 
@@ -166,7 +175,7 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
     )
   }
 
-  if (options.enqueueAi !== false) {
+  if (options.enqueueAi !== false && shouldEnqueueLocalAiDescription(rootPath)) {
     enqueueAiDescriptionAfterCreate(rootPath, {
       key,
       title,
