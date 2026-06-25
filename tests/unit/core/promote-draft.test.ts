@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 
 import { UsageError } from "../../../src/core/errors"
 import { promoteDraft } from "../../../src/core/promote-draft"
+import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import { enableSyncClientMode, listDirtyRecords } from "./sync-dirty-test-helpers"
 
 type MockedMethod<T, K extends keyof T> = { mock: { restore(): void } }
@@ -158,7 +159,7 @@ test("promoteDraft moves a draft into an existing note folder and preserves side
     assert.equal(await readFile(path.join(rootPath, "note", "work", "promoted-draft-000000.md"), "utf8"), "Draft ABC body\n")
     await assert.rejects(readFile(path.join(rootPath, ".data", "notes", "draft-abc123.json"), "utf8"))
 
-    const sidecar = JSON.parse(await readFile(path.join(rootPath, ".data", "notes", "promoted-draft-000000.json"), "utf8"))
+    const sidecar = createSidecarRepository(rootPath).read("promoted-draft-000000")
     assert.equal(sidecar.type, "normal")
     assert.equal(sidecar.key, "promoted-draft-000000")
     assert.equal(sidecar.title, "Promoted Draft")
@@ -269,7 +270,7 @@ test("promoteDraft refuses to reuse the original draft key for the promoted norm
       randomSource: () => 0,
     }), UsageError)
 
-    const sidecar = JSON.parse(await readFile(path.join(rootPath, ".data", "notes", "draft-000000.json"), "utf8"))
+    const sidecar = createSidecarRepository(rootPath).read("draft-000000")
     assert.equal(sidecar.type, "draft")
     assert.equal(sidecar.relativePath, "draft/draft-000000.md")
     assert.equal(await readFile(path.join(rootPath, "draft", "draft-000000.md"), "utf8"), "Draft 000000 body\n")

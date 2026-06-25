@@ -1,8 +1,10 @@
 import path from "node:path"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, rmSync } from "node:fs"
 
 import { APP_STATE_NOTES_DIRECTORY } from "../config/root"
+import { createNoteId } from "../platform/ids"
 import type { ParsedNote } from "../storage/note-schema"
+import type { NoteSidecar } from "../storage/sidecar-schema"
 import { createSidecarRepository } from "../storage/sidecar-repository"
 import { createDirtyRecordRepository } from "./dirty-repository"
 import { createFolderRepository } from "./folder-repository"
@@ -47,13 +49,25 @@ export function getNoteSyncEntityId(rootPath: string, note: Pick<ParsedNote, "fr
       }
 
       const storageIdentifier = path.basename(entry.name, ".json")
+      let sidecar: NoteSidecar
       try {
-        const sidecar = sidecars.read(storageIdentifier)
-        if (sidecar.key === note.frontmatter.id && path.normalize(sidecar.relativePath) === path.normalize(note.sourcePath)) {
-          return sidecar.noteId ?? sidecar.key
-        }
+        sidecar = sidecars.read(storageIdentifier)
       } catch {
         // Ignore malformed optional sidecars; fall back to the note key below.
+        continue
+      }
+
+      if (sidecar.key === note.frontmatter.id && path.normalize(sidecar.relativePath) === path.normalize(note.sourcePath)) {
+        if (sidecar.noteId !== undefined) {
+          return sidecar.noteId
+        }
+
+        const noteId = createNoteId()
+        sidecars.write({ ...sidecar, noteId })
+        if (storageIdentifier !== noteId) {
+          rmSync(sidecars.getSidecarPath(storageIdentifier), { force: true })
+        }
+        return noteId
       }
     }
   }

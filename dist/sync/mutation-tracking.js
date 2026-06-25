@@ -1,6 +1,7 @@
 import path from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { APP_STATE_NOTES_DIRECTORY } from "../config/root.js";
+import { createNoteId } from "../platform/ids.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
 import { createFolderRepository } from "./folder-repository.js";
@@ -16,14 +17,24 @@ export function getNoteSyncEntityId(rootPath, note) {
                 continue;
             }
             const storageIdentifier = path.basename(entry.name, ".json");
+            let sidecar;
             try {
-                const sidecar = sidecars.read(storageIdentifier);
-                if (sidecar.key === note.frontmatter.id && path.normalize(sidecar.relativePath) === path.normalize(note.sourcePath)) {
-                    return sidecar.noteId ?? sidecar.key;
-                }
+                sidecar = sidecars.read(storageIdentifier);
             }
             catch {
                 // Ignore malformed optional sidecars; fall back to the note key below.
+                continue;
+            }
+            if (sidecar.key === note.frontmatter.id && path.normalize(sidecar.relativePath) === path.normalize(note.sourcePath)) {
+                if (sidecar.noteId !== undefined) {
+                    return sidecar.noteId;
+                }
+                const noteId = createNoteId();
+                sidecars.write({ ...sidecar, noteId });
+                if (storageIdentifier !== noteId) {
+                    rmSync(sidecars.getSidecarPath(storageIdentifier), { force: true });
+                }
+                return noteId;
             }
         }
     }

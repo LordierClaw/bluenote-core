@@ -50,6 +50,7 @@ function validAiConfig(enabled = true) {
 
 function createStoredNote(rootPath: string, input: {
   key: string
+  noteId?: string
   title: string
   body?: string
   updatedAt: string
@@ -59,6 +60,7 @@ function createStoredNote(rootPath: string, input: {
   const repository = createNoteRepository(rootPath)
   const createdAt = "2026-06-01T00:00:00.000Z"
   const record = repository.create({
+    noteId: input.noteId,
     frontmatter: {
       id: input.key,
       schemaVersion: 1,
@@ -77,7 +79,7 @@ function createStoredNote(rootPath: string, input: {
 
   if (input.lastProcessedAt) {
     const sidecars = createSidecarRepository(rootPath)
-    const sidecar = sidecars.read(input.key)
+    const sidecar = input.noteId === undefined ? sidecars.read(input.key) : sidecars.readByNoteId(input.noteId)
     sidecars.write({
       ...sidecar,
       ai: {
@@ -251,6 +253,26 @@ test("notes processed at or after updatedAt are not enqueued", async () => {
     })
 
     assert.deepEqual(result, { scanned: 2, enqueued: 0 })
+    assert.equal(existsSync(getAiQueuePath(rootPath)), false)
+  })
+})
+
+test("notes processed at or after updatedAt are not enqueued when sidecars are noteId-keyed", async () => {
+  await withRoot("bluenote-stale-scan-fresh-noteid-sidecar-", async (rootPath) => {
+    createAiConfigRepository(rootPath).write(validAiConfig(true))
+    createStoredNote(rootPath, {
+      key: "schema-three-note",
+      noteId: "note_schema_three_fresh",
+      title: "Schema Three Note",
+      updatedAt: "2026-06-01T10:00:00.000Z",
+      lastProcessedAt: "2026-06-01T10:01:00.000Z",
+    })
+
+    const result = scanAndEnqueueStaleDescriptions(rootPath, {
+      clock: fixedClock("2026-06-01T11:00:00.000Z"),
+    })
+
+    assert.deepEqual(result, { scanned: 1, enqueued: 0 })
     assert.equal(existsSync(getAiQueuePath(rootPath)), false)
   })
 })

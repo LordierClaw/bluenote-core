@@ -5,7 +5,8 @@ import { enqueueDescribeNoteIfAiEnabled } from "./enqueue-describe-note"
 import { createNoteDescription } from "../domain/note-description"
 import type { Clock } from "../platform/clock"
 import { createNoteRepository } from "../storage/note-repository"
-import { createSidecarRepository } from "../storage/sidecar-repository"
+import { createSidecarRepository, type SidecarRepository } from "../storage/sidecar-repository"
+import type { NoteSidecar } from "../storage/sidecar-schema"
 
 export interface ScanAndEnqueueStaleDescriptionsOptions {
   clock: Clock
@@ -27,6 +28,18 @@ function isDescriptionStale(updatedAt: string, lastProcessedAt: string | undefin
 function formatStaleScanWarning(key: string, error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return `Warning: could not scan note '${key}' for AI description refresh: ${message}`
+}
+
+function readOptionalSidecarByKey(sidecars: SidecarRepository, key: string): NoteSidecar | null {
+  if (existsSync(sidecars.getSidecarPath(key))) {
+    return sidecars.read(key)
+  }
+
+  try {
+    return sidecars.read(key)
+  } catch {
+    return null
+  }
 }
 
 export function scanAndEnqueueStaleDescriptions(
@@ -59,8 +72,7 @@ export function scanAndEnqueueStaleDescriptions(
         continue
       }
 
-      const sidecarPath = sidecars.getSidecarPath(key)
-      const sidecar = existsSync(sidecarPath) ? sidecars.read(key) : null
+      const sidecar = readOptionalSidecarByKey(sidecars, key)
       const lastProcessedAt = sidecar?.ai?.description?.lastProcessedAt
 
       if (!isDescriptionStale(note.frontmatter.updatedAt, lastProcessedAt)) {

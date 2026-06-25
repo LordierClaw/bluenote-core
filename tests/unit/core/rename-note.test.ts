@@ -6,6 +6,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:f
 
 import { UsageError } from "../../../src/core/errors"
 import { renameNote } from "../../../src/core/rename-note"
+import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import { enableSyncClientMode, listDirtyRecords } from "./sync-dirty-test-helpers"
 
 async function writePlainNoteWithSidecar(
@@ -135,9 +136,7 @@ test("renameNote renames the key, file, and sidecar and reports the previous and
     await assert.rejects(() => access(path.join(rootPath, relativePath)))
     await assert.rejects(() => access(path.join(rootPath, ".data", "notes", "original-note.json")))
 
-    const sidecar = JSON.parse(
-      await readFile(path.join(rootPath, ".data", "notes", "renamed-title-00000a.json"), "utf8"),
-    ) as {
+    const sidecar = createSidecarRepository(rootPath).read("renamed-title-00000a") as {
       ai?: unknown
       description: string
       key: string

@@ -13,6 +13,17 @@ function formatStaleScanWarning(key, error) {
     const message = error instanceof Error ? error.message : String(error);
     return `Warning: could not scan note '${key}' for AI description refresh: ${message}`;
 }
+function readOptionalSidecarByKey(sidecars, key) {
+    if (existsSync(sidecars.getSidecarPath(key))) {
+        return sidecars.read(key);
+    }
+    try {
+        return sidecars.read(key);
+    }
+    catch {
+        return null;
+    }
+}
 export function scanAndEnqueueStaleDescriptions(rootPath, options) {
     const configRepository = createAiConfigRepository(rootPath);
     if (!configRepository.exists()) {
@@ -34,8 +45,7 @@ export function scanAndEnqueueStaleDescriptions(rootPath, options) {
             if (note.frontmatter.archivedAt !== undefined) {
                 continue;
             }
-            const sidecarPath = sidecars.getSidecarPath(key);
-            const sidecar = existsSync(sidecarPath) ? sidecars.read(key) : null;
+            const sidecar = readOptionalSidecarByKey(sidecars, key);
             const lastProcessedAt = sidecar?.ai?.description?.lastProcessedAt;
             if (!isDescriptionStale(note.frontmatter.updatedAt, lastProcessedAt)) {
                 continue;

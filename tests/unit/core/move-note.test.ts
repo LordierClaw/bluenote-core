@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 
 import { SelectorNotFoundError, UsageError } from "../../../src/core/errors"
 import { moveNote } from "../../../src/core/move-note"
+import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import { enableSyncClientMode, listDirtyRecords } from "./sync-dirty-test-helpers"
 
 async function writeSidecarNote(rootPath: string, input: { key: string; noteId?: string; title: string; relativePath: string; type?: "normal" | "draft" | "archived" }) {
@@ -77,7 +78,7 @@ test("moveNote moves a normal note to an existing note folder and preserves key/
     await assert.rejects(readFile(path.join(rootPath, "note", "work", "roadmap.md"), "utf8"))
     assert.equal(await readFile(path.join(rootPath, "note", "projects", "roadmap.md"), "utf8"), "Roadmap body\n")
 
-    const sidecar = JSON.parse(await readFile(path.join(rootPath, ".data", "notes", "roadmap.json"), "utf8"))
+    const sidecar = createSidecarRepository(rootPath).read("roadmap")
     assert.equal(sidecar.key, "roadmap")
     assert.equal(sidecar.title, "Roadmap")
     assert.equal(sidecar.description, "existing description")

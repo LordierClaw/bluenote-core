@@ -5,7 +5,7 @@ import path from "node:path"
 import { existsSync, readFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 
-import { createBlueNoteCore, createDirtyRecordRepository, UsageError } from "@lordierclaw/bluenote-core"
+import { createBlueNoteCore, createDirtyRecordRepository, createNoteRepository, createSidecarRepository, UsageError } from "@lordierclaw/bluenote-core"
 import { readSyncRuntimeMode } from "../../../src/sync/runtime-mode"
 import { getStateManifestPath, readStateManifest } from "../../../src/storage/state-manifest"
 
@@ -103,6 +103,39 @@ describe("createBlueNoteCore sync namespace", () => {
         lastError: null,
       })
       assert.deepEqual(core.sync.now(), { status: "transport-not-configured", pushed: 0, pulled: 0 })
+    })
+  })
+
+  test("link persists a stable noteId before seeding legacy sidecars", async () => {
+    await withTempRoot("bluenote-core-sync-link-legacy-noteid-", async (rootPath) => {
+      const core = createBlueNoteCore({ rootPath })
+      core.init()
+      createNoteRepository(rootPath).create({
+        frontmatter: {
+          id: "legacy-sync-note",
+          schemaVersion: 1,
+          title: "Legacy Sync Note",
+          mode: "plain",
+          tags: [],
+          createdAt: "2026-06-01T00:00:00.000Z",
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        },
+        body: "Legacy body.",
+      })
+      assert.equal(createSidecarRepository(rootPath).read("legacy-sync-note").noteId, undefined)
+
+      const summary = core.sync.link({
+        mode: "seed-empty-server-from-local",
+        serverUrl: "https://sync.example.test",
+      })
+
+      const sidecar = createSidecarRepository(rootPath).read("legacy-sync-note")
+      assert.match(sidecar.noteId ?? "", /^note_/)
+      const dirtyRecords = createDirtyRecordRepository(rootPath, { role: "client", workspaceId: summary.workspaceId }).listDirtyRecords()
+      assert.deepEqual(dirtyRecords.map((record) => [record.entityType, record.entityId, record.dirtyType]), [
+        ["note", sidecar.noteId, "upsert"],
+      ])
+      assert.equal(existsSync(path.join(rootPath, ".data", "notes", "legacy-sync-note.json")), false)
     })
   })
 
