@@ -247,6 +247,38 @@ test("server rejects nested draft note sync paths", async () => {
   })
 })
 
+
+test("server rejects hidden note sync paths", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "hidden-note": "Hidden body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "hidden-note",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "foo",
+          title: "Hidden Note",
+          relativePath: "note/.hidden/foo.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }],
+    })
+
+    assert.equal(response.accepted.length, 0)
+    assert.equal(response.rejected.length, 1)
+    assert.match(response.rejected[0].message, /Invalid sync note relativePath/)
+    assert.equal(existsSync(path.join(rootPath, "note", ".hidden", "foo.md")), false)
+  })
+})
+
 test("server binds body downloads to the requested revision", async () => {
   await withRoot((rootPath) => {
     const server = createSyncServerService({ rootPath, workspaceId })

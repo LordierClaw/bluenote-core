@@ -108,6 +108,10 @@ function basenameKeyFromRelativePath(relativePath: string): string {
   return path.posix.basename(relativePath, ".md")
 }
 
+function relativePathHasHiddenSegment(relativePath: string): boolean {
+  return relativePath.split("/").some((segment) => segment.startsWith("."))
+}
+
 function normalizeRelativePath(relativePath: string, rootPath: string): string {
   const portableRelativePath = relativePath.replace(/\\/g, "/").replace(/^\.\//, "")
   const isSyncNotePath = portableRelativePath.startsWith("note/") || portableRelativePath.startsWith("draft/")
@@ -134,6 +138,11 @@ function normalizeRelativePath(relativePath: string, rootPath: string): string {
   if (normalizedRelativePath.startsWith("draft/") && path.posix.dirname(normalizedRelativePath) !== "draft") {
     throw new UsageError(`Invalid sync note relativePath '${relativePath}'.`, {
       hint: "Draft note sync paths must be direct children of draft/.",
+    })
+  }
+  if (relativePathHasHiddenSegment(normalizedRelativePath)) {
+    throw new UsageError(`Invalid sync note relativePath '${relativePath}'.`, {
+      hint: "Note sync pushes must not target hidden path segments.",
     })
   }
   const allowedRoot = normalizedRelativePath.startsWith("draft/") ? getDraftNotesPath(rootPath) : getNormalNotesPath(rootPath)

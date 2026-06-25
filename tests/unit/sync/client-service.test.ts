@@ -9,6 +9,7 @@ import { createBlueNoteCore, createDirtyRecordRepository, createFolderRepository
 import { createSyncClientService } from "../../../src/sync/client-service"
 import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import { setSyncRuntimeMode } from "../../../src/sync/runtime-mode"
+import { withSyncDatabase } from "../../../src/sync/sync-db"
 import type { PullChangesRequest, PullChangesResponse, PushRequest, PushResponse } from "../../../src/sync/protocol"
 
 const workspaceId = "workspace-client-service"
@@ -155,6 +156,43 @@ describe("sync client service", () => {
       assert.deepEqual(createSyncClientService({ rootPath, workspaceId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
       assert.deepEqual(transport.calls, ["pull", "download:note-from-default-local"])
       assert.equal(readFileSync(path.join(rootPath, "note", "default-local.md"), "utf8"), "Remote body from another default client.\n")
+    })
+  })
+
+
+  test("default replica ID ignores workspace-copied sync database localReplicaId", async () => {
+    await withRoot(async (rootPath) => {
+      enableClient(rootPath)
+      const previousConfigHome = process.env.XDG_CONFIG_HOME
+      const configRoot = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-client-replica-config-"))
+      process.env.XDG_CONFIG_HOME = configRoot
+      try {
+        withSyncDatabase(rootPath, { role: "client", workspaceId }, (handle) => {
+          handle.db.run("INSERT INTO sync_meta (key, value) VALUES ('localReplicaId', ?)", ["replica_copied_workspace"])
+        }, { save: true })
+        const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+        dirty.markDirty({
+          entityType: "note",
+          entityId: "note-copied-replica",
+          dirtyType: "delete",
+          markedAt: "2026-06-24T03:00:00.000Z",
+          metadata: { relativePath: "note/copied-replica.md" },
+        })
+        const transport = makeTransport()
+
+        createSyncClientService({ rootPath, workspaceId, transport }).syncNow()
+
+        assert.equal(transport.pushes.length, 1)
+        assert.notEqual(transport.pushes[0].replicaId, "replica_copied_workspace")
+        assert.match(transport.pushes[0].replicaId, /^replica_/)
+      } finally {
+        if (previousConfigHome === undefined) {
+          delete process.env.XDG_CONFIG_HOME
+        } else {
+          process.env.XDG_CONFIG_HOME = previousConfigHome
+        }
+        await rm(configRoot, { recursive: true, force: true })
+      }
     })
   })
 

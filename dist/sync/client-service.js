@@ -1,5 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
+import { createHash } from "node:crypto";
 import { createNoteDescription } from "../domain/note-description.js";
 import { UsageError } from "../core/errors.js";
 import { rebuildIndexes } from "../core/rebuild-indexes.js";
@@ -49,6 +51,11 @@ function normalizeNoteRelativePath(rootPath, relativePath) {
     if (normalizedRelativePath.startsWith("draft/") && path.posix.dirname(normalizedRelativePath) !== "draft") {
         throw new UsageError(`Invalid pulled note relativePath '${relativePath}'.`, {
             hint: "Draft note sync paths must be direct children of draft/.",
+        });
+    }
+    if (normalizedRelativePath.split("/").some((segment) => segment.startsWith("."))) {
+        throw new UsageError(`Invalid pulled note relativePath '${relativePath}'.`, {
+            hint: "Pulled note sync paths must not contain hidden path segments.",
         });
     }
     return normalizedRelativePath;
@@ -130,17 +137,30 @@ function writeReplicaProgress(rootPath, identity, replicaId, sequence, pushedAt)
       `, [replicaId, identity.workspaceId, new Date().toISOString(), sequence, pushedAt ?? null]);
     }, { save: true });
 }
+function machineLocalReplicaIdPath(rootPath, workspaceId) {
+    const key = createHash("sha256").update(`${workspaceId}\u0000${path.resolve(rootPath)}`).digest("hex");
+    const configRoot = process.env.XDG_CONFIG_HOME && process.env.XDG_CONFIG_HOME.trim().length > 0
+        ? process.env.XDG_CONFIG_HOME
+        : path.join(os.homedir(), ".config");
+    return path.join(configRoot, "bluenote", "sync-replicas", `${key}.json`);
+}
 function readOrCreateLocalReplicaId(rootPath, identity) {
-    return withSyncDatabase(rootPath, identity, (handle) => {
-        const rows = handle.db.exec("SELECT value FROM sync_meta WHERE key = 'localReplicaId'")[0]?.values ?? [];
-        const existing = rows[0]?.[0];
-        if (typeof existing === "string" && existing.trim().length > 0) {
-            return existing;
+    withSyncDatabase(rootPath, identity, () => undefined, { save: true });
+    const replicaIdPath = machineLocalReplicaIdPath(rootPath, identity.workspaceId);
+    try {
+        const parsed = JSON.parse(fs.readFileSync(replicaIdPath, "utf8"));
+        const replicaId = typeof parsed === "object" && parsed !== null ? parsed.replicaId : undefined;
+        if (typeof replicaId === "string" && replicaId.trim().length > 0) {
+            return replicaId;
         }
-        const replicaId = createReplicaId();
-        handle.db.run("INSERT INTO sync_meta (key, value) VALUES ('localReplicaId', ?)", [replicaId]);
-        return replicaId;
-    }, { save: true });
+    }
+    catch {
+        // Missing or invalid machine-local replica files are regenerated below.
+    }
+    const replicaId = createReplicaId();
+    fs.mkdirSync(path.dirname(replicaIdPath), { recursive: true });
+    fs.writeFileSync(replicaIdPath, `${JSON.stringify({ replicaId }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    return replicaId;
 }
 function readSidecarIfExists(rootPath, noteId) {
     const sidecars = createSidecarRepository(rootPath);
