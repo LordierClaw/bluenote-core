@@ -141,6 +141,80 @@ test("server accepts pushed note metadata and body, writes Markdown and sidecar,
 
 
 
+
+
+test("server rejects synced note relocation to a key owned by another note", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    const initial = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: {
+        "note-a": "Alpha body.\n",
+        "note-b": "Beta body.\n",
+      },
+      records: [{
+        entityType: "note",
+        entityId: "note-a",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "alpha-note",
+          title: "Alpha Note",
+          relativePath: "note/work/alpha-note.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        bodyUpload: { contentHash: "sha256:alpha", byteLength: 12 },
+      }, {
+        entityType: "note",
+        entityId: "note-b",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "shared-key",
+          title: "Shared Key",
+          relativePath: "note/other/shared-key.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        bodyUpload: { contentHash: "sha256:beta", byteLength: 11 },
+      }],
+    })
+    assert.equal(initial.rejected.length, 0)
+
+    const rejected = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: initial.serverSequence,
+      noteBodies: { "note-a": "Alpha moved body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-a",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+        metadata: {
+          key: "shared-key",
+          title: "Alpha Renamed",
+          relativePath: "note/work/shared-key.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:01:00.000Z",
+        },
+        bodyUpload: { contentHash: "sha256:alpha-moved", byteLength: 18 },
+      }],
+    })
+
+    assert.equal(rejected.accepted.length, 0)
+    assert.equal(rejected.rejected.length, 1)
+    assert.match(rejected.rejected[0].message, /key 'shared-key'/)
+    assert.equal(existsSync(path.join(rootPath, "note", "work", "shared-key.md")), false)
+    assert.equal(readFileSync(path.join(rootPath, "note", "work", "alpha-note.md"), "utf8"), "Alpha body.\n")
+    assert.equal(createSidecarRepository(rootPath).readByNoteId("note-a").key, "alpha-note")
+    assert.equal(createSidecarRepository(rootPath).readByNoteId("note-b").key, "shared-key")
+  })
+})
+
 test("server rejects nested draft note sync paths", async () => {
   await withRoot((rootPath) => {
     const server = createSyncServerService({ rootPath, workspaceId })

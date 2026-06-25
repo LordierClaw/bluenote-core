@@ -205,11 +205,41 @@ function findNoteIdByRelativePath(rootPath, relativePath) {
     }
     return null;
 }
+function findNoteIdByKey(rootPath, key) {
+    const stateNotesPath = assertPathInsideRoot(rootPath, path.join(rootPath, STATE_NOTES_DIRECTORY));
+    if (!fs.existsSync(stateNotesPath)) {
+        return null;
+    }
+    for (const entry of fs.readdirSync(stateNotesPath, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".json")) {
+            continue;
+        }
+        try {
+            const parsed = JSON.parse(fs.readFileSync(path.join(stateNotesPath, entry.name), "utf8"));
+            if (typeof parsed === "object" && parsed !== null && parsed.key === key) {
+                const noteId = parsed.noteId;
+                return typeof noteId === "string" ? noteId : path.basename(entry.name, ".json");
+            }
+        }
+        catch {
+            // Ignore unrelated malformed sidecars here; direct sidecar reads still validate when targeted.
+        }
+    }
+    return null;
+}
 function assertRelativePathAvailable(rootPath, relativePath, ownerNoteId) {
     const existingOwner = findNoteIdByRelativePath(rootPath, relativePath);
     if (existingOwner !== null && existingOwner !== ownerNoteId) {
         throw new UsageError(`Cannot sync note '${ownerNoteId}' to '${relativePath}'.`, {
             hint: `The destination path is already owned by note '${existingOwner}'.`,
+        });
+    }
+}
+function assertNoteKeyAvailable(rootPath, key, ownerNoteId) {
+    const existingOwner = findNoteIdByKey(rootPath, key);
+    if (existingOwner !== null && existingOwner !== ownerNoteId) {
+        throw new UsageError(`Cannot sync note '${ownerNoteId}' with key '${key}'.`, {
+            hint: `The note key is already owned by note '${existingOwner}'.`,
         });
     }
 }
@@ -256,6 +286,7 @@ function upsertNote(rootPath, record, body) {
     try {
         ensureSyncNoteFolder(rootPath, metadata.relativePath);
         assertRelativePathAvailable(rootPath, metadata.relativePath, record.entityId);
+        assertNoteKeyAvailable(rootPath, metadata.key, record.entityId);
         assertPathAndParentsAreNotSymlinks(rootPath, targetPath);
         if (sidecar === null) {
             repository.create({
