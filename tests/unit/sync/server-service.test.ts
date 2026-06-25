@@ -544,6 +544,7 @@ test("server rejects pushed folder upserts through symlinked parents", async () 
 
 test("server accepts folder dirty records so client folder queues can drain", async () => {
   await withRoot((rootPath) => {
+    mkdirSync(path.join(rootPath, "note", "old-projects"), { recursive: true })
     const server = createSyncServerService({ rootPath, workspaceId })
 
     const response = server.acceptPush({
@@ -588,6 +589,7 @@ test("server accepts folder dirty records so client folder queues can drain", as
       },
     ])
     assert.equal(existsSync(path.join(rootPath, "note", "projects")), true)
+    assert.equal(existsSync(path.join(rootPath, "note", "old-projects")), false)
     assert.deepEqual(server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 }).changes.map((change) => ({
       entityType: change.entityType,
       entityId: change.entityId,

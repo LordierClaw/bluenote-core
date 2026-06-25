@@ -478,6 +478,8 @@ function applyFolderPush(
 
   if (record.dirtyType === "folder-upsert") {
     fs.mkdirSync(folderPath, { recursive: true })
+  } else if (record.dirtyType === "folder-delete" && existed) {
+    fs.rmdirSync(folderPath)
   }
 
   handle.db.run(
@@ -504,6 +506,12 @@ function applyFolderPush(
       if (!existed && record.dirtyType === "folder-upsert") {
         try {
           fs.rmdirSync(folderPath)
+        } catch {
+          // Best-effort rollback: preserve original sync error.
+        }
+      } else if (existed && record.dirtyType === "folder-delete") {
+        try {
+          fs.mkdirSync(folderPath, { recursive: true })
         } catch {
           // Best-effort rollback: preserve original sync error.
         }

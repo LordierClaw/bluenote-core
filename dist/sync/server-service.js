@@ -363,6 +363,9 @@ function applyFolderPush(rootPath, handle, record) {
     if (record.dirtyType === "folder-upsert") {
         fs.mkdirSync(folderPath, { recursive: true });
     }
+    else if (record.dirtyType === "folder-delete" && existed) {
+        fs.rmdirSync(folderPath);
+    }
     handle.db.run(`
       INSERT INTO folders (relativePath, createdAt, updatedAt, deletedAt)
       VALUES (?, ?, ?, ?)
@@ -383,6 +386,14 @@ function applyFolderPush(rootPath, handle, record) {
             if (!existed && record.dirtyType === "folder-upsert") {
                 try {
                     fs.rmdirSync(folderPath);
+                }
+                catch {
+                    // Best-effort rollback: preserve original sync error.
+                }
+            }
+            else if (existed && record.dirtyType === "folder-delete") {
+                try {
+                    fs.mkdirSync(folderPath, { recursive: true });
                 }
                 catch {
                     // Best-effort rollback: preserve original sync error.

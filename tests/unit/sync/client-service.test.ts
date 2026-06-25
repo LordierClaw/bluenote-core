@@ -559,6 +559,43 @@ describe("sync client service", () => {
     })
   })
 
+  test("pulled folder deletes remove existing local empty folders", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects", "empty"), { recursive: true })
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 8,
+          hasMore: false,
+          changes: [{
+            sequence: 8,
+            entityType: "folder",
+            entityId: "note/projects/empty",
+            changeType: "folder-delete",
+            serverRevision: 2,
+            changedAt: "2026-06-24T02:00:00.000Z",
+            relativePath: "note/projects/empty",
+            bodyAvailable: false,
+            metadata: { relativePath: "note/projects/empty", deletedAt: "2026-06-24T02:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "empty")), false)
+      assert.deepEqual(createFolderRepository(rootPath, { role: "client", workspaceId }).listFolders(), [
+        {
+          relativePath: "note/projects/empty",
+          createdAt: "2026-06-24T02:00:00.000Z",
+          updatedAt: "2026-06-24T02:00:00.000Z",
+          deletedAt: "2026-06-24T02:00:00.000Z",
+        },
+      ])
+    })
+  })
+
   test("pulled folder paths must remain under note after normalization", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

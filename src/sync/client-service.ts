@@ -354,10 +354,12 @@ function normalizeFolderRelativePath(rootPath: string, change: SyncChangeView): 
 function applyPulledFolderChange(rootPath: string, identity: EnsureSyncDatabaseOptions, change: SyncChangeView): void {
   const relativePath = normalizeFolderRelativePath(rootPath, change)
   const deletedAt = change.changeType === "folder-delete" ? metadataString(change.metadata, "deletedAt") ?? change.changedAt : null
+  const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath))
+  assertPathAndParentsAreNotSymlinks(rootPath, folderPath)
   if (deletedAt === null) {
-    const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath))
-    assertPathAndParentsAreNotSymlinks(rootPath, folderPath)
     fs.mkdirSync(folderPath, { recursive: true })
+  } else if (fs.existsSync(folderPath)) {
+    fs.rmdirSync(folderPath)
   }
   createFolderRepository(rootPath, identity).upsertFolder({
     relativePath,
