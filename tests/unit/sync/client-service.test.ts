@@ -256,6 +256,60 @@ describe("sync client service", () => {
     })
   })
 
+
+  test("pulled renames reject keys used by raw Markdown notes", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "legacy"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const synced = core.notes.create({
+        type: "normal",
+        title: "Synced Raw Original",
+        body: "Original raw body.\n",
+        destinationFolder: "note",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-synced-raw-original",
+      })
+      writeFileSync(path.join(rootPath, "note", "legacy", "raw-collision.md"), "Legacy raw body.\n", "utf8")
+      const transport = makeTransport({
+        bodies: { [synced.noteId]: "Renamed remote body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "note",
+            entityId: synced.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T05:00:00.000Z",
+            title: "Raw Collision",
+            relativePath: "note/raw-collision.md",
+            bodyAvailable: true,
+            sourceReplicaId: "remote-replica",
+            metadata: {
+              key: "raw-collision",
+              relativePath: "note/raw-collision.md",
+              title: "Raw Collision",
+              createdAt: "2026-06-24T05:00:00.000Z",
+              updatedAt: "2026-06-24T05:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /already used by another Markdown note/,
+      )
+      assert.equal(readFileSync(path.join(rootPath, synced.relativePath), "utf8"), "Original raw body.\n")
+      assert.equal(readFileSync(path.join(rootPath, "note", "legacy", "raw-collision.md"), "utf8"), "Legacy raw body.\n")
+      assert.equal(existsSync(path.join(rootPath, "note", "raw-collision.md")), false)
+    })
+  })
+
   test("sync cycle surfaces rejected pushes and keeps dirty records pending", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

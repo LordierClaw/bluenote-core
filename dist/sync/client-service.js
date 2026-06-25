@@ -9,7 +9,7 @@ import { createReplicaId } from "../platform/ids.js";
 import { assertPathInsideRoot, toRootRelativePath } from "../platform/path-safety.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { serializePlainNote } from "../storage/plain-note.js";
-import { getStateNotesPath } from "../storage/root-layout.js";
+import { getNormalNotesPath, getStateNotesPath } from "../storage/root-layout.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { createDirtyRecordRepository } from "./dirty-repository.js";
 import { createFolderRepository } from "./folder-repository.js";
@@ -187,6 +187,36 @@ function findSidecarOwnerForRelativePath(rootPath, relativePath) {
     }
     return null;
 }
+function findRawNoteRelativePathByKey(rootPath, key, allowedRelativePaths) {
+    const normalNotesPath = getNormalNotesPath(rootPath);
+    if (!fs.existsSync(normalNotesPath)) {
+        return null;
+    }
+    const pending = [normalNotesPath];
+    while (pending.length > 0) {
+        const directoryPath = pending.pop();
+        if (directoryPath === undefined) {
+            continue;
+        }
+        for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+            const entryPath = assertPathInsideRoot(rootPath, path.join(directoryPath, entry.name));
+            if (entry.isDirectory()) {
+                if (!entry.name.startsWith(".")) {
+                    pending.push(entryPath);
+                }
+                continue;
+            }
+            if (!entry.isFile() || !entry.name.endsWith(".md") || path.basename(entry.name, ".md") !== key) {
+                continue;
+            }
+            const relativePath = toRootRelativePath(rootPath, entryPath);
+            if (!allowedRelativePaths.has(relativePath)) {
+                return relativePath;
+            }
+        }
+    }
+    return null;
+}
 function findSidecarOwnerForKey(rootPath, key) {
     const stateNotesPath = getStateNotesPath(rootPath);
     const sidecars = createSidecarRepository(rootPath);
@@ -225,6 +255,14 @@ function assertPulledNoteKeyAvailable(rootPath, key, noteId) {
     if (owner !== null && owner !== noteId) {
         throw new UsageError(`Pulled note key '${key}' is already owned by another note.`, {
             hint: "Rejecting pulled note relocation to avoid duplicate local note keys.",
+        });
+    }
+    const ownerSidecar = readSidecarIfExists(rootPath, noteId);
+    const allowedRelativePaths = new Set(ownerSidecar === null ? [] : [ownerSidecar.relativePath]);
+    const rawCollisionPath = findRawNoteRelativePathByKey(rootPath, key, allowedRelativePaths);
+    if (rawCollisionPath !== null) {
+        throw new UsageError(`Pulled note key '${key}' is already used by another Markdown note.`, {
+            hint: `Rejecting pulled note relocation because '${rawCollisionPath}' already uses that key.`,
         });
     }
 }

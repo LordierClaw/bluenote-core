@@ -213,6 +213,36 @@ function findNoteIdByRelativePath(rootPath, relativePath) {
     }
     return null;
 }
+function findRawNoteRelativePathByKey(rootPath, key, allowedRelativePaths) {
+    const normalNotesPath = getNormalNotesPath(rootPath);
+    if (!fs.existsSync(normalNotesPath)) {
+        return null;
+    }
+    const pending = [normalNotesPath];
+    while (pending.length > 0) {
+        const directoryPath = pending.pop();
+        if (directoryPath === undefined) {
+            continue;
+        }
+        for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+            const entryPath = assertPathInsideRoot(rootPath, path.join(directoryPath, entry.name));
+            if (entry.isDirectory()) {
+                if (!entry.name.startsWith(".")) {
+                    pending.push(entryPath);
+                }
+                continue;
+            }
+            if (!entry.isFile() || !entry.name.endsWith(".md") || path.basename(entry.name, ".md") !== key) {
+                continue;
+            }
+            const relativePath = toRootRelativePath(rootPath, entryPath);
+            if (!allowedRelativePaths.has(relativePath)) {
+                return relativePath;
+            }
+        }
+    }
+    return null;
+}
 function findNoteIdByKey(rootPath, key) {
     const stateNotesPath = assertPathInsideRoot(rootPath, path.join(rootPath, STATE_NOTES_DIRECTORY));
     if (!fs.existsSync(stateNotesPath)) {
@@ -248,6 +278,14 @@ function assertNoteKeyAvailable(rootPath, key, ownerNoteId) {
     if (existingOwner !== null && existingOwner !== ownerNoteId) {
         throw new UsageError(`Cannot sync note '${ownerNoteId}' with key '${key}'.`, {
             hint: `The note key is already owned by note '${existingOwner}'.`,
+        });
+    }
+    const ownerSidecar = readSidecarIfExists(rootPath, ownerNoteId);
+    const allowedRelativePaths = new Set(ownerSidecar === null ? [] : [ownerSidecar.relativePath]);
+    const rawCollisionPath = findRawNoteRelativePathByKey(rootPath, key, allowedRelativePaths);
+    if (rawCollisionPath !== null) {
+        throw new UsageError(`Cannot sync note '${ownerNoteId}' with key '${key}'.`, {
+            hint: `The note key is already used by Markdown note '${rawCollisionPath}'.`,
         });
     }
 }

@@ -249,6 +249,61 @@ test("server rejects nested draft note sync paths", async () => {
 
 
 
+
+test("server rejects synced renames that collide with raw Markdown note keys", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+    const initial = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      noteBodies: { "note-raw-collision": "Original body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-raw-collision",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {
+          key: "original-raw-collision",
+          title: "Original Raw Collision",
+          relativePath: "note/original-raw-collision.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }],
+    })
+    mkdirSync(path.join(rootPath, "note", "legacy"), { recursive: true })
+    writeFileSync(path.join(rootPath, "note", "legacy", "raw-collision.md"), "Legacy raw body.\n", "utf8")
+
+    const renamed = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: initial.serverSequence,
+      noteBodies: { "note-raw-collision": "Renamed body.\n" },
+      records: [{
+        entityType: "note",
+        entityId: "note-raw-collision",
+        dirtyType: "upsert",
+        clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+        metadata: {
+          key: "raw-collision",
+          title: "Raw Collision",
+          relativePath: "note/raw-collision.md",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:01:00.000Z",
+        },
+      }],
+    })
+
+    assert.deepEqual(renamed.accepted, [])
+    assert.equal(renamed.rejected.length, 1)
+    assert.match(renamed.rejected[0].message, /raw-collision/)
+    assert.equal(existsSync(path.join(rootPath, "note", "raw-collision.md")), false)
+    assert.equal(readFileSync(path.join(rootPath, "note", "original-raw-collision.md"), "utf8"), "Original body.\n")
+    assert.equal(readFileSync(path.join(rootPath, "note", "legacy", "raw-collision.md"), "utf8"), "Legacy raw body.\n")
+  })
+})
+
 test("server rejects future push cursors before mutating note files", async () => {
   await withRoot((rootPath) => {
     const server = createSyncServerService({ rootPath, workspaceId })
