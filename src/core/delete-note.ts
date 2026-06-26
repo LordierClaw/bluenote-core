@@ -9,6 +9,8 @@ import { rebuildIndexes } from "./rebuild-indexes"
 import { selectNote } from "./select-note"
 import type { NoteVisibilityOptions } from "./note-visibility"
 import { systemClock, type Clock } from "../platform/clock"
+import { createSidecarRepository } from "../storage/sidecar-repository"
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot"
 
 export interface DeleteNoteOptions extends ResolveBlueNoteRootOptions, NoteVisibilityOptions {
   selector: string
@@ -34,25 +36,34 @@ export function deleteNote(options: DeleteNoteOptions): DeleteNoteSummary {
   const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility })
   const syncEntityId = getNoteSyncEntityId(rootPath, selected)
   const deletedAt = (options.clock ?? systemClock).now().toISOString()
+  const snapshots = snapshotFiles([
+    path.join(rootPath, selected.sourcePath),
+    createSidecarRepository(rootPath).getSidecarPathByNoteId(syncEntityId),
+  ])
   const deleted = repository.delete(path.join(rootPath, selected.sourcePath))
-  recordSyncMutationBestEffort(rootPath, {
-    tombstones: [{
-      entityId: syncEntityId,
-      deletedAt,
-      previousRelativePath: selected.sourcePath,
-      previousTitle: selected.frontmatter.title,
-    }],
-    notes: [{
-      entityId: syncEntityId,
-      dirtyType: "delete",
-      markedAt: deletedAt,
-      metadata: {
-        key: selected.frontmatter.id,
+  try {
+    recordSyncMutationBestEffort(rootPath, {
+      tombstones: [{
+        entityId: syncEntityId,
+        deletedAt,
         previousRelativePath: selected.sourcePath,
-        title: selected.frontmatter.title,
-      },
-    }],
-  })
+        previousTitle: selected.frontmatter.title,
+      }],
+      notes: [{
+        entityId: syncEntityId,
+        dirtyType: "delete",
+        markedAt: deletedAt,
+        metadata: {
+          key: selected.frontmatter.id,
+          previousRelativePath: selected.sourcePath,
+          title: selected.frontmatter.title,
+        },
+      }],
+    })
+  } catch (error) {
+    restoreFileSnapshots(snapshots)
+    throw error
+  }
 
   const rebuildSummary = rebuildIndexes({ override: rootPath })
 

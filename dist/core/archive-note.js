@@ -7,6 +7,9 @@ import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutat
 import { ensureManagedRoot } from "../storage/root-layout.js";
 import { rebuildIndexes } from "./rebuild-indexes.js";
 import { selectNote } from "./select-note.js";
+import { createSidecarRepository } from "../storage/sidecar-repository.js";
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot.js";
+import path from "node:path";
 function isArchivedNote(note) {
     return note.frontmatter.archivedAt !== undefined || note.sourcePath.startsWith(joinPortableRelativePath(".data", "archive") + "/");
 }
@@ -35,20 +38,31 @@ export function archiveNote(options) {
     }
     const syncEntityId = getNoteSyncEntityId(rootPath, selected);
     const archivedAt = (options.clock ?? systemClock).now().toISOString();
+    const snapshots = snapshotFiles([
+        path.join(rootPath, selected.sourcePath),
+        path.join(rootPath, ".data", "archive", `${selected.frontmatter.id}.md`),
+        createSidecarRepository(rootPath).getSidecarPathByNoteId(syncEntityId),
+    ]);
     const archived = repository.archive(`${rootPath}/${selected.sourcePath}`, archivedAt);
-    recordSyncMutationBestEffort(rootPath, {
-        notes: [{
-                entityId: syncEntityId,
-                dirtyType: "delete",
-                markedAt: archivedAt,
-                metadata: {
-                    archivedAt,
-                    key: selected.frontmatter.id,
-                    previousRelativePath: selected.sourcePath,
-                    title: selected.frontmatter.title,
-                },
-            }],
-    });
+    try {
+        recordSyncMutationBestEffort(rootPath, {
+            notes: [{
+                    entityId: syncEntityId,
+                    dirtyType: "delete",
+                    markedAt: archivedAt,
+                    metadata: {
+                        archivedAt,
+                        key: selected.frontmatter.id,
+                        previousRelativePath: selected.sourcePath,
+                        title: selected.frontmatter.title,
+                    },
+                }],
+        });
+    }
+    catch (error) {
+        restoreFileSnapshots(snapshots);
+        throw error;
+    }
     const rebuildSummary = rebuildIndexes({ override: rootPath });
     if (rebuildSummary.validationErrors.length > 0) {
         throwArchiveValidationError("after", selected.sourcePath, rebuildSummary.validationErrors);

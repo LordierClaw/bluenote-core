@@ -6,6 +6,8 @@ import { createNoteRepository } from "../storage/note-repository"
 import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 import { selectNote } from "./select-note"
 import { UsageError } from "./errors"
+import { createSidecarRepository } from "../storage/sidecar-repository"
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot"
 
 export interface MoveNoteOptions extends ResolveBlueNoteRootOptions {
   selector: string
@@ -40,23 +42,34 @@ export function moveNote(options: MoveNoteOptions): MoveNoteSummary {
   const selected = selectNote({ repository, selector: options.selector })
   const syncEntityId = getNoteSyncEntityId(rootPath, selected)
   const markedAt = options.updatedAt ?? new Date().toISOString()
+  const nextPath = path.join(rootPath, options.destinationFolder, path.basename(selected.sourcePath))
+  const snapshots = snapshotFiles([
+    path.join(rootPath, selected.sourcePath),
+    nextPath,
+    createSidecarRepository(rootPath).getSidecarPathByNoteId(syncEntityId),
+  ])
 
   try {
     const moved = repository.moveNote(path.join(rootPath, selected.sourcePath), options.destinationFolder, markedAt)
     updateLatestOpenedPathIfMatched(rootPath, moved.previousRelativePath, moved.relativePath)
-    recordSyncMutationBestEffort(rootPath, {
-      notes: [{
-        entityId: syncEntityId,
-        markedAt,
-        metadata: {
-          key: moved.key,
-          previousRelativePath: moved.previousRelativePath,
-          relativePath: moved.relativePath,
-          title: selected.frontmatter.title,
-        },
-      }],
-      folders: [{ relativePath: options.destinationFolder, markedAt }],
-    })
+    try {
+      recordSyncMutationBestEffort(rootPath, {
+        notes: [{
+          entityId: syncEntityId,
+          markedAt,
+          metadata: {
+            key: moved.key,
+            previousRelativePath: moved.previousRelativePath,
+            relativePath: moved.relativePath,
+            title: selected.frontmatter.title,
+          },
+        }],
+        folders: [{ relativePath: options.destinationFolder, markedAt }],
+      })
+    } catch (error) {
+      restoreFileSnapshots(snapshots)
+      throw error
+    }
     return {
       ...moved,
       title: selected.frontmatter.title,

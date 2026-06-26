@@ -464,6 +464,11 @@ function deleteNote(rootPath, record) {
 }
 function applyFolderPush(rootPath, handle, record) {
     const relativePath = normalizeFolderRelativePath(stringMetadata(record.metadata, "relativePath") ?? record.entityId, rootPath);
+    if (record.dirtyType === "folder-delete" && relativePath === "note") {
+        throw new UsageError("Cannot sync delete the managed note root folder.", {
+            hint: "Delete only custom folders under note/, not the top-level note directory.",
+        });
+    }
     const deletedAt = record.dirtyType === "folder-delete" ? record.clientUpdatedAt : null;
     const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
     const existed = fs.existsSync(folderPath);

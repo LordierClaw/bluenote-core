@@ -9,6 +9,9 @@ import { ensureManagedRoot } from "../storage/root-layout"
 import { rebuildIndexes } from "./rebuild-indexes"
 import { selectNote } from "./select-note"
 import type { NoteVisibilityOptions } from "./note-visibility"
+import { createSidecarRepository } from "../storage/sidecar-repository"
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot"
+import path from "node:path"
 
 export interface ArchiveNoteOptions extends ResolveBlueNoteRootOptions, NoteVisibilityOptions {
   selector: string
@@ -60,21 +63,31 @@ export function archiveNote(options: ArchiveNoteOptions): ArchiveNoteSummary {
 
   const syncEntityId = getNoteSyncEntityId(rootPath, selected)
   const archivedAt = (options.clock ?? systemClock).now().toISOString()
+  const snapshots = snapshotFiles([
+    path.join(rootPath, selected.sourcePath),
+    path.join(rootPath, ".data", "archive", `${selected.frontmatter.id}.md`),
+    createSidecarRepository(rootPath).getSidecarPathByNoteId(syncEntityId),
+  ])
   const archived = repository.archive(`${rootPath}/${selected.sourcePath}`, archivedAt)
 
-  recordSyncMutationBestEffort(rootPath, {
-    notes: [{
-      entityId: syncEntityId,
-      dirtyType: "delete",
-      markedAt: archivedAt,
-      metadata: {
-        archivedAt,
-        key: selected.frontmatter.id,
-        previousRelativePath: selected.sourcePath,
-        title: selected.frontmatter.title,
-      },
-    }],
-  })
+  try {
+    recordSyncMutationBestEffort(rootPath, {
+      notes: [{
+        entityId: syncEntityId,
+        dirtyType: "delete",
+        markedAt: archivedAt,
+        metadata: {
+          archivedAt,
+          key: selected.frontmatter.id,
+          previousRelativePath: selected.sourcePath,
+          title: selected.frontmatter.title,
+        },
+      }],
+    })
+  } catch (error) {
+    restoreFileSnapshots(snapshots)
+    throw error
+  }
 
   const rebuildSummary = rebuildIndexes({ override: rootPath })
 

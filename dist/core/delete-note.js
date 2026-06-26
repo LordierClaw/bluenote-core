@@ -7,6 +7,8 @@ import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutat
 import { rebuildIndexes } from "./rebuild-indexes.js";
 import { selectNote } from "./select-note.js";
 import { systemClock } from "../platform/clock.js";
+import { createSidecarRepository } from "../storage/sidecar-repository.js";
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot.js";
 export function deleteNote(options) {
     if (!options.force) {
         throw new UsageError("Deleting notes requires --force.", {
@@ -18,25 +20,35 @@ export function deleteNote(options) {
     const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility });
     const syncEntityId = getNoteSyncEntityId(rootPath, selected);
     const deletedAt = (options.clock ?? systemClock).now().toISOString();
+    const snapshots = snapshotFiles([
+        path.join(rootPath, selected.sourcePath),
+        createSidecarRepository(rootPath).getSidecarPathByNoteId(syncEntityId),
+    ]);
     const deleted = repository.delete(path.join(rootPath, selected.sourcePath));
-    recordSyncMutationBestEffort(rootPath, {
-        tombstones: [{
-                entityId: syncEntityId,
-                deletedAt,
-                previousRelativePath: selected.sourcePath,
-                previousTitle: selected.frontmatter.title,
-            }],
-        notes: [{
-                entityId: syncEntityId,
-                dirtyType: "delete",
-                markedAt: deletedAt,
-                metadata: {
-                    key: selected.frontmatter.id,
+    try {
+        recordSyncMutationBestEffort(rootPath, {
+            tombstones: [{
+                    entityId: syncEntityId,
+                    deletedAt,
                     previousRelativePath: selected.sourcePath,
-                    title: selected.frontmatter.title,
-                },
-            }],
-    });
+                    previousTitle: selected.frontmatter.title,
+                }],
+            notes: [{
+                    entityId: syncEntityId,
+                    dirtyType: "delete",
+                    markedAt: deletedAt,
+                    metadata: {
+                        key: selected.frontmatter.id,
+                        previousRelativePath: selected.sourcePath,
+                        title: selected.frontmatter.title,
+                    },
+                }],
+        });
+    }
+    catch (error) {
+        restoreFileSnapshots(snapshots);
+        throw error;
+    }
     const rebuildSummary = rebuildIndexes({ override: rootPath });
     if (rebuildSummary.validationErrors.length > 0) {
         throw new IndexValidationFailedError([`Deleted note '${selected.frontmatter.id}', but derived indexes could not be rebuilt.`, ...rebuildSummary.validationErrors].join("\n"), {

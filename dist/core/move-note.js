@@ -5,6 +5,8 @@ import { createNoteRepository } from "../storage/note-repository.js";
 import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
 import { selectNote } from "./select-note.js";
 import { UsageError } from "./errors.js";
+import { createSidecarRepository } from "../storage/sidecar-repository.js";
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot.js";
 function updateLatestOpenedPathIfMatched(rootPath, previousRelativePath, nextRelativePath) {
     const latestPath = path.join(rootPath, ".data", "latest-opened-note.json");
     try {
@@ -23,22 +25,34 @@ export function moveNote(options) {
     const selected = selectNote({ repository, selector: options.selector });
     const syncEntityId = getNoteSyncEntityId(rootPath, selected);
     const markedAt = options.updatedAt ?? new Date().toISOString();
+    const nextPath = path.join(rootPath, options.destinationFolder, path.basename(selected.sourcePath));
+    const snapshots = snapshotFiles([
+        path.join(rootPath, selected.sourcePath),
+        nextPath,
+        createSidecarRepository(rootPath).getSidecarPathByNoteId(syncEntityId),
+    ]);
     try {
         const moved = repository.moveNote(path.join(rootPath, selected.sourcePath), options.destinationFolder, markedAt);
         updateLatestOpenedPathIfMatched(rootPath, moved.previousRelativePath, moved.relativePath);
-        recordSyncMutationBestEffort(rootPath, {
-            notes: [{
-                    entityId: syncEntityId,
-                    markedAt,
-                    metadata: {
-                        key: moved.key,
-                        previousRelativePath: moved.previousRelativePath,
-                        relativePath: moved.relativePath,
-                        title: selected.frontmatter.title,
-                    },
-                }],
-            folders: [{ relativePath: options.destinationFolder, markedAt }],
-        });
+        try {
+            recordSyncMutationBestEffort(rootPath, {
+                notes: [{
+                        entityId: syncEntityId,
+                        markedAt,
+                        metadata: {
+                            key: moved.key,
+                            previousRelativePath: moved.previousRelativePath,
+                            relativePath: moved.relativePath,
+                            title: selected.frontmatter.title,
+                        },
+                    }],
+                folders: [{ relativePath: options.destinationFolder, markedAt }],
+            });
+        }
+        catch (error) {
+            restoreFileSnapshots(snapshots);
+            throw error;
+        }
         return {
             ...moved,
             title: selected.frontmatter.title,

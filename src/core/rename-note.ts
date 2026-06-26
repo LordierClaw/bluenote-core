@@ -9,6 +9,8 @@ import { joinPortableRelativePath } from "../platform/path-safety"
 import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 import { UsageError } from "./errors"
 import type { NoteVisibilityOptions } from "./note-visibility"
+import { createSidecarRepository } from "../storage/sidecar-repository"
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot"
 
 export interface RenameNoteHooks {
   onRecoveryArtifactStaged?: (artifactPath: string) => void
@@ -72,11 +74,17 @@ export function renameNote(options: RenameNoteOptions): RenameNoteSummary {
   }
 
   const recoveryArtifactPath = buildRecoveryArtifactPath(rootPath, currentKey, nextKey)
+  const nextRelativePath = joinPortableRelativePath(path.posix.dirname(selected.sourcePath), `${nextKey}.md`)
+  const snapshots = snapshotFiles([
+    path.join(rootPath, selected.sourcePath),
+    path.join(rootPath, nextRelativePath),
+    createSidecarRepository(rootPath).getSidecarPathByNoteId(syncEntityId),
+  ])
   const recoveryArtifact = {
     previousKey: currentKey,
     nextKey,
     previousRelativePath: selected.sourcePath,
-    nextRelativePath: joinPortableRelativePath(path.posix.dirname(selected.sourcePath), `${nextKey}.md`),
+    nextRelativePath,
     stagedAt: options.updatedAt,
   }
 
@@ -100,19 +108,24 @@ export function renameNote(options: RenameNoteOptions): RenameNoteSummary {
 
     updateLatestOpenedPathIfMatched(rootPath, renamed.previousRelativePath, renamed.relativePath)
 
-    recordSyncMutationBestEffort(rootPath, {
-      notes: [{
-        entityId: syncEntityId,
-        markedAt: options.updatedAt,
-        metadata: {
-          key: renamed.key,
-          previousKey: renamed.previousKey,
-          previousRelativePath: renamed.previousRelativePath,
-          relativePath: renamed.relativePath,
-          title: options.title,
-        },
-      }],
-    })
+    try {
+      recordSyncMutationBestEffort(rootPath, {
+        notes: [{
+          entityId: syncEntityId,
+          markedAt: options.updatedAt,
+          metadata: {
+            key: renamed.key,
+            previousKey: renamed.previousKey,
+            previousRelativePath: renamed.previousRelativePath,
+            relativePath: renamed.relativePath,
+            title: options.title,
+          },
+        }],
+      })
+    } catch (error) {
+      restoreFileSnapshots(snapshots)
+      throw error
+    }
 
     return renamed
   } catch (error) {

@@ -818,6 +818,32 @@ test("server rejects pushed folder upserts through symlinked parents", async () 
   })
 })
 
+test("server rejects folder deletes for the managed note root", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      records: [{
+        entityType: "folder",
+        entityId: "note",
+        dirtyType: "folder-delete",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: { relativePath: "note" },
+      }],
+    })
+
+    assert.deepEqual(response.accepted, [])
+    assert.equal(response.rejected.length, 1)
+    assert.match(response.rejected[0].message, /managed note root folder/)
+    assert.equal(existsSync(path.join(rootPath, "note")), true)
+    assert.equal(readServerChanges(rootPath).length, 0)
+  })
+})
+
+
 test("server accepts folder dirty records so client folder queues can drain", async () => {
   await withRoot((rootPath) => {
     mkdirSync(path.join(rootPath, "note", "old-projects"), { recursive: true })

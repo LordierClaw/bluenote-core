@@ -1,7 +1,7 @@
 import { test } from "vitest"
 import assert from "node:assert/strict"
 import path from "node:path"
-import { access, readFile, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 
 import { deleteNote } from "../../../src/core/delete-note"
 import { enableSyncClientMode, listDirtyRecords, listTombstones, withTempRoot, writeSidecarNote } from "./sync-dirty-test-helpers"
@@ -105,5 +105,25 @@ test("deleteNote records sync delete even when post-delete rebuild reports unrel
       },
     ])
     await assert.rejects(readFile(path.join(rootPath, "note", "work", "obsolete.md"), "utf8"))
+  })
+})
+
+
+test("deleteNote restores the note when sync dirty tracking fails", async () => {
+  await withTempRoot("bluenote-delete-note-sync-dirty-failure-", async (rootPath) => {
+    await enableSyncClientMode(rootPath)
+    await writeSidecarNote(rootPath, { noteId: "note_delete_tracking_failure", key: "obsolete", title: "Obsolete", relativePath: "note/work/obsolete.md" })
+    await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
+
+    assert.throws(
+      () => deleteNote({ override: rootPath, selector: "obsolete", force: true, clock: deletionClock }),
+      /Could not record sync dirty state for local mutation/,
+    )
+
+    assert.equal(await readFile(path.join(rootPath, "note", "work", "obsolete.md"), "utf8"), "Obsolete body\n")
+    assert.equal(JSON.parse(await readFile(path.join(rootPath, ".data", "notes", "note_delete_tracking_failure.json"), "utf8")).key, "obsolete")
+    await rm(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true, force: true })
+    assert.deepEqual(listDirtyRecords(rootPath), [])
+    assert.deepEqual(listTombstones(rootPath), [])
   })
 })
