@@ -431,6 +431,34 @@ function applyPulledNoteDelete(rootPath: string, change: SyncChangeView): void {
   }
 }
 
+function applyPulledNoteMetadataOnly(rootPath: string, change: SyncChangeView): boolean {
+  const existingSidecar = readSidecarIfExists(rootPath, change.entityId)
+  if (existingSidecar === null) {
+    return false
+  }
+
+  const description = metadataString(change.metadata, "description")
+  const ai = metadataObject(change.metadata, "ai") as NoteSidecar["ai"] | undefined
+  if (description === null && ai === undefined) {
+    return false
+  }
+
+  const sidecars = createSidecarRepository(rootPath)
+  const sidecarPath = sidecars.getSidecarPathByNoteId(change.entityId)
+  const snapshots = [snapshotFile(sidecarPath)]
+  try {
+    sidecars.write({
+      ...existingSidecar,
+      ...(description === null ? {} : { description }),
+      ...(ai === undefined ? {} : { ai }),
+    })
+  } catch (error) {
+    restoreFileSnapshots(rootPath, snapshots)
+    throw error
+  }
+  return true
+}
+
 function normalizeFolderRelativePath(rootPath: string, change: SyncChangeView): string {
   const rawRelativePath = metadataString(change.metadata, "relativePath") ?? change.relativePath ?? change.entityId
   const portableRelativePath = rawRelativePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/u, "")
@@ -487,6 +515,9 @@ function applyPulledChange(rootPath: string, identity: EnsureSyncDatabaseOptions
     return false
   }
   if (change.bodyAvailable === false) {
+    if (change.sourceReplicaId === "server-ai") {
+      return applyPulledNoteMetadataOnly(rootPath, change)
+    }
     throw new UsageError("Pulled note upsert is missing an available body.", {
       hint: "Note upsert changes must provide a downloadable body before local content can be replaced.",
     })
@@ -596,7 +627,8 @@ function applyPulledChangeBeforeCursorAdvance(
   dirty: ReturnType<typeof createDirtyRecordRepository>,
 ): boolean {
   const applied = applyPulledChange(rootPath, identity, change, transport)
-  if (applied && hasLocalDirtyRecord(dirty, change)) {
+  const metadataOnlyServerAi = change.entityType === "note" && change.changeType === "upsert" && change.bodyAvailable === false && change.sourceReplicaId === "server-ai"
+  if (applied && !metadataOnlyServerAi && hasLocalDirtyRecord(dirty, change)) {
     dirty.clearDirtyRecord(change.entityType, change.entityId)
   }
   return applied

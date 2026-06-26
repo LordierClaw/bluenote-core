@@ -1494,7 +1494,7 @@ test("server publishes queued AI sidecar updates as pullable note changes", asyn
     assert.equal(changes.toSequence, 2)
     assert.equal(changes.changes.length, 1)
     assert.equal(changes.changes[0].sourceReplicaId, "server-ai")
-    assert.equal(changes.changes[0].bodyAvailable, true)
+    assert.equal(changes.changes[0].bodyAvailable, false)
     assert.deepEqual(changes.changes[0].metadata, {
       key: "ai-note",
       title: "AI Note",

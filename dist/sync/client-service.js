@@ -372,6 +372,32 @@ function applyPulledNoteDelete(rootPath, change) {
         fs.rmSync(sidecarPath, { force: true });
     }
 }
+function applyPulledNoteMetadataOnly(rootPath, change) {
+    const existingSidecar = readSidecarIfExists(rootPath, change.entityId);
+    if (existingSidecar === null) {
+        return false;
+    }
+    const description = metadataString(change.metadata, "description");
+    const ai = metadataObject(change.metadata, "ai");
+    if (description === null && ai === undefined) {
+        return false;
+    }
+    const sidecars = createSidecarRepository(rootPath);
+    const sidecarPath = sidecars.getSidecarPathByNoteId(change.entityId);
+    const snapshots = [snapshotFile(sidecarPath)];
+    try {
+        sidecars.write({
+            ...existingSidecar,
+            ...(description === null ? {} : { description }),
+            ...(ai === undefined ? {} : { ai }),
+        });
+    }
+    catch (error) {
+        restoreFileSnapshots(rootPath, snapshots);
+        throw error;
+    }
+    return true;
+}
 function normalizeFolderRelativePath(rootPath, change) {
     const rawRelativePath = metadataString(change.metadata, "relativePath") ?? change.relativePath ?? change.entityId;
     const portableRelativePath = rawRelativePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/u, "");
@@ -427,6 +453,9 @@ function applyPulledChange(rootPath, identity, change, transport) {
         return false;
     }
     if (change.bodyAvailable === false) {
+        if (change.sourceReplicaId === "server-ai") {
+            return applyPulledNoteMetadataOnly(rootPath, change);
+        }
         throw new UsageError("Pulled note upsert is missing an available body.", {
             hint: "Note upsert changes must provide a downloadable body before local content can be replaced.",
         });
@@ -519,7 +548,8 @@ function hasLocalDirtyRecord(dirty, change) {
 }
 function applyPulledChangeBeforeCursorAdvance(rootPath, identity, change, transport, dirty) {
     const applied = applyPulledChange(rootPath, identity, change, transport);
-    if (applied && hasLocalDirtyRecord(dirty, change)) {
+    const metadataOnlyServerAi = change.entityType === "note" && change.changeType === "upsert" && change.bodyAvailable === false && change.sourceReplicaId === "server-ai";
+    if (applied && !metadataOnlyServerAi && hasLocalDirtyRecord(dirty, change)) {
         dirty.clearDirtyRecord(change.entityType, change.entityId);
     }
     return applied;

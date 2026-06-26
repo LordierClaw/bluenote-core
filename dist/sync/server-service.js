@@ -658,7 +658,7 @@ function publishAiSidecarChange(rootPath, dbIdentity, workspaceId, noteId) {
             sourceReplicaId: "server-ai",
             title: sidecar.title,
             relativePath: sidecar.relativePath,
-            bodyAvailable: true,
+            bodyAvailable: false,
             metadata: {
                 key: sidecar.key,
                 title: sidecar.title,

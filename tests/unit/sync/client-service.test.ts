@@ -121,6 +121,74 @@ describe("sync client service", () => {
     })
   })
 
+  test("server AI metadata-only pulls do not overwrite or clear local dirty note bodies", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Local Dirty AI",
+        body: "Original synced body.\n",
+        destinationFolder: "note",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-local-ai-dirty",
+        randomSource: () => 46655,
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+      writeFileSync(path.join(rootPath, note.relativePath), "Unsynced local edit.\n", "utf8")
+      dirty.markDirty({
+        entityType: "note",
+        entityId: note.noteId,
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { key: note.key, relativePath: note.relativePath, title: note.title },
+      })
+
+      const transport = makeTransport({
+        pull: (request) => request.sinceSequence === 0 ? {
+          workspaceId: request.workspaceId,
+          fromSequence: 0,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: note.title,
+            relativePath: note.relativePath,
+            bodyAvailable: false,
+            sourceReplicaId: "server-ai",
+            metadata: {
+              key: note.key,
+              title: note.title,
+              description: "Generated server AI description.",
+              relativePath: note.relativePath,
+              ai: { description: { lastProcessedAt: "2026-06-24T01:00:00.000Z" } },
+            },
+          }],
+        } : { workspaceId: request.workspaceId, fromSequence: request.sinceSequence, toSequence: request.sinceSequence, hasMore: false, changes: [] },
+        bodies: { [note.noteId]: "Stale server body that must not be downloaded.\n" },
+      })
+
+      const summary = createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
+
+      assert.deepEqual(transport.calls, ["pull", "push", "pull"])
+      assert.equal(readFileSync(path.join(rootPath, note.relativePath), "utf8"), "Unsynced local edit.\n")
+      assert.equal(createSidecarRepository(rootPath).readByNoteId(note.noteId).description, "Generated server AI description.")
+      assert.equal(transport.pushes.length, 1)
+      assert.equal(transport.pushes[0].records[0].entityId, note.noteId)
+      assert.equal(transport.pushes[0].noteBodies?.[note.noteId], "Unsynced local edit.\n")
+      assert.deepEqual(summary, { status: "synced", pushed: 1, pulled: 1 })
+    })
+  })
+
+
   test("default replica IDs are unique per root instead of treating sourceReplicaId local as an own echo", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)
