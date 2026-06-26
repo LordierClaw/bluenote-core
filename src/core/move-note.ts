@@ -36,13 +36,17 @@ function updateLatestOpenedPathIfMatched(rootPath: string, previousRelativePath:
   }
 }
 
+function normalizeDestinationFolder(relativePath: string): string {
+  return relativePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+|\/+$/g, "")
+}
+
 export function moveNote(options: MoveNoteOptions): MoveNoteSummary {
   const rootPath = resolveBlueNoteRoot(options)
   const repository = createNoteRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector })
   const syncEntityId = getNoteSyncEntityId(rootPath, selected)
   const markedAt = options.updatedAt ?? new Date().toISOString()
-  const nextPath = path.join(rootPath, options.destinationFolder, path.basename(selected.sourcePath))
+  const nextPath = path.join(rootPath, normalizeDestinationFolder(options.destinationFolder), path.basename(selected.sourcePath))
   const snapshots = snapshotFiles([
     path.join(rootPath, selected.sourcePath),
     nextPath,

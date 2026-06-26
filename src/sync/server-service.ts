@@ -601,22 +601,43 @@ function applyFolderPush(
   const existed = fs.existsSync(folderPath)
   assertPathAndParentsAreNotSymlinks(rootPath, folderPath)
 
-  if (record.dirtyType === "folder-upsert") {
-    fs.mkdirSync(folderPath, { recursive: true })
-  } else if (record.dirtyType === "folder-delete" && existed) {
-    fs.rmdirSync(folderPath)
+  const rollback = () => {
+    if (!existed && record.dirtyType === "folder-upsert") {
+      try {
+        fs.rmdirSync(folderPath)
+      } catch {
+        // Best-effort rollback: preserve original sync error.
+      }
+    } else if (existed && record.dirtyType === "folder-delete") {
+      try {
+        fs.mkdirSync(folderPath, { recursive: true })
+      } catch {
+        // Best-effort rollback: preserve original sync error.
+      }
+    }
   }
 
-  handle.db.run(
-    `
-      INSERT INTO folders (relativePath, createdAt, updatedAt, deletedAt)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(relativePath) DO UPDATE SET
-        updatedAt = excluded.updatedAt,
-        deletedAt = excluded.deletedAt
-    `,
-    [relativePath, record.clientUpdatedAt, record.clientUpdatedAt, deletedAt],
-  )
+  try {
+    if (record.dirtyType === "folder-upsert") {
+      fs.mkdirSync(folderPath, { recursive: true })
+    } else if (record.dirtyType === "folder-delete" && existed) {
+      fs.rmdirSync(folderPath)
+    }
+
+    handle.db.run(
+      `
+        INSERT INTO folders (relativePath, createdAt, updatedAt, deletedAt)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(relativePath) DO UPDATE SET
+          updatedAt = excluded.updatedAt,
+          deletedAt = excluded.deletedAt
+      `,
+      [relativePath, record.clientUpdatedAt, record.clientUpdatedAt, deletedAt],
+    )
+  } catch (error) {
+    rollback()
+    throw error
+  }
 
   return {
     value: {
@@ -627,21 +648,7 @@ function applyFolderPush(
         ...(deletedAt === null ? {} : { deletedAt }),
       },
     },
-    rollback() {
-      if (!existed && record.dirtyType === "folder-upsert") {
-        try {
-          fs.rmdirSync(folderPath)
-        } catch {
-          // Best-effort rollback: preserve original sync error.
-        }
-      } else if (existed && record.dirtyType === "folder-delete") {
-        try {
-          fs.mkdirSync(folderPath, { recursive: true })
-        } catch {
-          // Best-effort rollback: preserve original sync error.
-        }
-      }
-    },
+    rollback,
   }
 }
 

@@ -11,6 +11,7 @@ import initSqlJs from "sql.js"
 
 import { createSyncServerService } from "../../../src/sync/server-service"
 import { createFolderRepository, createSidecarRepository, createTombstoneRepository, ensureSyncDatabase, UsageError } from "../../../src"
+import { withSyncDatabase } from "../../../src/sync/sync-db"
 
 const workspaceId = "workspace-server"
 const dbIdentity = { role: "server" as const, workspaceId }
@@ -839,6 +840,41 @@ test("server rejects folder deletes for the managed note root", async () => {
     assert.equal(response.rejected.length, 1)
     assert.match(response.rejected[0].message, /managed note root folder/)
     assert.equal(existsSync(path.join(rootPath, "note")), true)
+    assert.equal(readServerChanges(rootPath).length, 0)
+  })
+})
+
+
+test("server rolls back folder filesystem changes when folder DB write fails", async () => {
+  await withRoot((rootPath) => {
+    withSyncDatabase(rootPath, dbIdentity, (handle) => {
+      handle.db.run(`
+        CREATE TRIGGER fail_folder_insert
+        BEFORE INSERT ON folders
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated folder write failure');
+        END
+      `)
+    }, { save: true })
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      records: [{
+        entityType: "folder",
+        entityId: "note/db-failure",
+        dirtyType: "folder-upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: { relativePath: "note/db-failure" },
+      }],
+    })
+
+    assert.deepEqual(response.accepted, [])
+    assert.equal(response.rejected.length, 1)
+    assert.match(response.rejected[0].message, /simulated folder write failure/)
+    assert.equal(existsSync(path.join(rootPath, "note", "db-failure")), false)
     assert.equal(readServerChanges(rootPath).length, 0)
   })
 })

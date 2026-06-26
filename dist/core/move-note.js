@@ -19,13 +19,16 @@ function updateLatestOpenedPathIfMatched(rootPath, previousRelativePath, nextRel
         // Best-effort state repair; move success should not depend on optional UI state.
     }
 }
+function normalizeDestinationFolder(relativePath) {
+    return relativePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+|\/+$/g, "");
+}
 export function moveNote(options) {
     const rootPath = resolveBlueNoteRoot(options);
     const repository = createNoteRepository(rootPath);
     const selected = selectNote({ repository, selector: options.selector });
     const syncEntityId = getNoteSyncEntityId(rootPath, selected);
     const markedAt = options.updatedAt ?? new Date().toISOString();
-    const nextPath = path.join(rootPath, options.destinationFolder, path.basename(selected.sourcePath));
+    const nextPath = path.join(rootPath, normalizeDestinationFolder(options.destinationFolder), path.basename(selected.sourcePath));
     const snapshots = snapshotFiles([
         path.join(rootPath, selected.sourcePath),
         nextPath,

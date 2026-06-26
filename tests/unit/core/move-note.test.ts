@@ -203,6 +203,37 @@ test("moveNote marks the moved note and destination folder dirty in sync-client 
 })
 
 
+test("moveNote restores normalized destination when sync dirty tracking fails", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-move-note-sync-dirty-normalized-failure-"))
+
+  try {
+    await enableSyncClientMode(rootPath)
+    await writeSidecarNote(rootPath, { noteId: "note_move_normalized_failure", key: "roadmap", title: "Roadmap", relativePath: "note/work/roadmap.md" })
+    await mkdir(path.join(rootPath, "note", "projects"), { recursive: true })
+    await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
+
+    assert.throws(
+      () => moveNote({
+        override: rootPath,
+        selector: "roadmap",
+        destinationFolder: String.raw`./note\projects/`,
+        updatedAt: "2026-06-07T11:00:00.000Z",
+      }),
+      /Could not record sync dirty state for local mutation/,
+    )
+
+    assert.equal(await readFile(path.join(rootPath, "note", "work", "roadmap.md"), "utf8"), "Roadmap body\n")
+    await assert.rejects(readFile(path.join(rootPath, "note", "projects", "roadmap.md"), "utf8"))
+    const sidecar = JSON.parse(await readFile(path.join(rootPath, ".data", "notes", "note_move_normalized_failure.json"), "utf8"))
+    assert.equal(sidecar.relativePath, "note/work/roadmap.md")
+    await rm(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true, force: true })
+    assert.deepEqual(listDirtyRecords(rootPath), [])
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+
 test("moveNote does not migrate sidecar-less legacy Markdown when destination validation fails", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-move-note-invalid-legacy-"))
   const legacyRelativePath = "note/work/legacy.md"
