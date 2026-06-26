@@ -8,6 +8,15 @@
 - Keep general core APIs at the package root (`@lordierclaw/bluenote-core`). Public subpath exports are allowed only for documented lightweight helpers/contracts such as `@lordierclaw/bluenote-core/search/contains-match` and `@lordierclaw/bluenote-core/api/daemon-contract`. Do not rely on `src/*` or `dist/*` private paths from consumers.
 - Avoid native SQLite dependencies; use `sql.js` for rebuildable cache metadata.
 - Keep core headless. Terminal/client packages own command routing, OpenTUI rendering, editor launch, clipboard bridges, and user interaction.
+- Keep sync primitives headless. Core may expose runtime mode, protocol, repository, client/server service, transport, logging, and repair building blocks, but hosted auth/security, TLS, daemon lifecycle, and `bluenote sync ...` command UX belong outside this package.
+
+## Sync runtime boundaries
+
+- Standalone remains the default runtime mode. Callers must explicitly link a root before sync-client behavior runs.
+- New managed roots use schema 3 state with workspace identity plus note-ID sidecars; note bodies remain plain Markdown.
+- Core sync uses local `.data/sync/` state for runtime mode, `sync.sqlite`, redacted JSONL logs, dirty records, tombstones, folders, replicas, and status.
+- The package root exports sync primitives for clients and the distribution package. Consumers must not import `src/sync/*` or `dist/sync/*` private paths.
+- The v1 core layer does not provide daemon auth/TLS, hosted user accounts, gateway authorization, or command routing. Those are follow-up responsibilities for distribution/gateway/client plans.
 
 ## Current baseline dependencies
 

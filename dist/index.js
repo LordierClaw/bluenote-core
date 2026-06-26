@@ -9,6 +9,7 @@ import { moveNote } from "./core/move-note.js";
 import { promoteDraft } from "./core/promote-draft.js";
 import { searchNotes } from "./core/search-notes.js";
 import { rebuildIndexes } from "./core/rebuild-indexes.js";
+import { getCoreSyncStatus, linkCoreSync, repairCoreSync, syncCoreNow, unlinkCoreSync, } from "./sync/core-sync.js";
 export * from "./core/errors.js";
 export * from "./core/archive-note.js";
 export * from "./core/init-root.js";
@@ -62,6 +63,18 @@ export * from "./storage/root-layout.js";
 export * from "./storage/sidecar-repository.js";
 export * from "./storage/sidecar-schema.js";
 export * from "./storage/state-manifest.js";
+export * from "./sync/core-sync.js";
+export * from "./sync/types.js";
+export * from "./sync/protocol.js";
+export * from "./sync/client-service.js";
+export * from "./sync/server-service.js";
+export * from "./sync/http-transport.js";
+export * from "./sync/sync-log.js";
+export * from "./sync/dirty-repository.js";
+export * from "./sync/folder-repository.js";
+export { ensureSyncDatabase, getSyncDatabasePath, SYNC_SCHEMA_VERSION, serializeSyncMetadata, parseSyncMetadata, } from "./sync/sync-db.js";
+export * from "./sync/status-repository.js";
+export * from "./sync/tombstone-repository.js";
 export * from "./search/contains-match.js";
 function applyRoot(config, options = {}) {
     const { rootPath, override, env, cwd, homeDir } = options;
@@ -113,6 +126,27 @@ export function createBlueNoteCore(config = {}) {
         search: {
             search(query, options = {}) {
                 return searchNotes(query, withRoot(config, options));
+            },
+        },
+        sync: {
+            status(options = {}) {
+                return getCoreSyncStatus(applyRoot(config, options));
+            },
+            link(options) {
+                return linkCoreSync(withRoot(config, options));
+            },
+            unlink(options = {}) {
+                return unlinkCoreSync(applyRoot(config, options));
+            },
+            now(options = {}) {
+                return syncCoreNow({
+                    transport: options.transport ?? config.syncTransport,
+                    replicaId: options.replicaId ?? config.syncReplicaId,
+                    ...withRoot(config, options),
+                });
+            },
+            repair(options = {}) {
+                return repairCoreSync(withRoot(config, options));
             },
         },
         rebuild(options = {}) {

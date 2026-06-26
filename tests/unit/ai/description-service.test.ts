@@ -167,6 +167,32 @@ test("generating for a selected note auto-applies a valid description, preserves
   })
 })
 
+test("generating for a noteId-keyed sidecar remains compatible with key selectors", async () => {
+  await withRoot("bluenote-ai-description-note-id-sidecar-", async (rootPath) => {
+    writeConfig(rootPath)
+    const repository = createNoteRepository(rootPath)
+    repository.create({
+      noteId: "note_project_notes_123",
+      frontmatter: FIXED_FRONTMATTER,
+      body: "Discuss launch tasks and owner follow-ups.\n",
+      destination: { type: "normal", folderRelativePath: "note" },
+    })
+    const provider = fakeClient({ text: "Launch tasks and owner follow-ups." })
+
+    const result = await generateNoteDescription({
+      rootPath,
+      selector: "project-notes",
+      client: provider.client,
+      clock: fixedClock("2026-06-01T10:05:00.000Z"),
+    })
+
+    assert.equal(result.status, "applied")
+    const updatedSidecar = createSidecarRepository(rootPath).readByNoteId("note_project_notes_123")
+    assert.equal(updatedSidecar.description, "Launch tasks and owner follow-ups.")
+    assert.equal(updatedSidecar.key, "project-notes")
+  })
+})
+
 test("AI apply preserves current sidecar path and archive metadata after an in-flight move", async () => {
   await withRoot("bluenote-ai-description-inflight-archive-", async (rootPath) => {
     writeConfig(rootPath)

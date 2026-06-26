@@ -8,13 +8,21 @@ import type { NoteSidecar } from "./sidecar-schema"
 import { validateNoteSidecar } from "./sidecar-schema"
 
 export interface SidecarRepository {
-  getSidecarPath(key: string): string
+  getSidecarPath(keyOrNoteId: string): string
+  getSidecarPathByNoteId(noteId: string): string
   read(key: string): NoteSidecar
+  readByNoteId(noteId: string): NoteSidecar
   write(sidecar: NoteSidecar): string
 }
 
 function getWriteValidationSourcePath(sidecar: unknown): string {
   if (typeof sidecar === "object" && sidecar !== null) {
+    const candidateNoteId = (sidecar as { noteId?: unknown }).noteId
+
+    if (typeof candidateNoteId === "string") {
+      return path.join(STATE_NOTES_DIRECTORY, `${candidateNoteId}.json`)
+    }
+
     const candidateKey = (sidecar as { key?: unknown }).key
 
     if (typeof candidateKey === "string") {
@@ -58,40 +66,80 @@ export function createSidecarRepository(rootPath: string): SidecarRepository {
   const normalizedRootPath = path.resolve(rootPath)
   const normalizedStateNotesPath = path.join(normalizedRootPath, STATE_NOTES_DIRECTORY)
 
-  function getSidecarPath(key: string): string {
-    return assertPathInsideRoot(normalizedStateNotesPath, path.join(normalizedStateNotesPath, `${key}.json`))
+  function getSidecarPath(keyOrNoteId: string): string {
+    return assertPathInsideRoot(normalizedStateNotesPath, path.join(normalizedStateNotesPath, `${keyOrNoteId}.json`))
+  }
+
+  function getSidecarPathByNoteId(noteId: string): string {
+    return getSidecarPath(noteId)
+  }
+
+  function readSidecar(identifier: string): NoteSidecar {
+    const sidecarPath = getSidecarPath(identifier)
+    let rawJson: string
+
+    try {
+      rawJson = fs.readFileSync(sidecarPath, "utf8")
+    } catch (error) {
+      wrapSidecarRepositoryError("read", path.join(STATE_NOTES_DIRECTORY, `${identifier}.json`), error)
+    }
+
+    let parsed: unknown
+
+    try {
+      parsed = JSON.parse(rawJson)
+    } catch (error) {
+      throw new UsageError(`Could not parse sidecar '${path.join(STATE_NOTES_DIRECTORY, `${identifier}.json`)}'.`, {
+        hint: "Ensure sidecar files contain valid JSON metadata.",
+        cause: error,
+      })
+    }
+
+    return validateNoteSidecar(parsed, path.join(STATE_NOTES_DIRECTORY, `${identifier}.json`))
+  }
+
+  function readSidecarByKey(key: string): NoteSidecar {
+    if (fs.existsSync(getSidecarPath(key))) {
+      return readSidecar(key)
+    }
+
+    if (fs.existsSync(normalizedStateNotesPath)) {
+      for (const entry of fs.readdirSync(normalizedStateNotesPath, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".json")) {
+          continue
+        }
+
+        const identifier = path.basename(entry.name, ".json")
+        try {
+          const sidecar = readSidecar(identifier)
+          if (sidecar.key === key) {
+            return sidecar
+          }
+        } catch {
+          // Ignore unrelated malformed sidecars while resolving key-compatible lookups.
+        }
+      }
+    }
+
+    return readSidecar(key)
   }
 
   return {
     getSidecarPath,
+    getSidecarPathByNoteId,
 
     read(key) {
-      const sidecarPath = getSidecarPath(key)
-      let rawJson: string
+      return readSidecarByKey(key)
+    },
 
-      try {
-        rawJson = fs.readFileSync(sidecarPath, "utf8")
-      } catch (error) {
-        wrapSidecarRepositoryError("read", path.join(STATE_NOTES_DIRECTORY, `${key}.json`), error)
-      }
-
-      let parsed: unknown
-
-      try {
-        parsed = JSON.parse(rawJson)
-      } catch (error) {
-        throw new UsageError(`Could not parse sidecar '${path.join(STATE_NOTES_DIRECTORY, `${key}.json`)}'.`, {
-          hint: "Ensure sidecar files contain valid JSON metadata.",
-          cause: error,
-        })
-      }
-
-      return validateNoteSidecar(parsed, path.join(STATE_NOTES_DIRECTORY, `${key}.json`))
+    readByNoteId(noteId) {
+      return readSidecar(noteId)
     },
 
     write(sidecar) {
       const canonicalSidecar = validateNoteSidecar(sidecar, getWriteValidationSourcePath(sidecar))
-      const sidecarPath = getSidecarPath(canonicalSidecar.key)
+      const pathIdentifier = canonicalSidecar.noteId ?? canonicalSidecar.key
+      const sidecarPath = getSidecarPath(pathIdentifier)
       const temporarySidecarPath = getTemporarySidecarPath(sidecarPath)
 
       try {
@@ -100,7 +148,7 @@ export function createSidecarRepository(rootPath: string): SidecarRepository {
         fs.renameSync(temporarySidecarPath, sidecarPath)
       } catch (error) {
         removeTemporarySidecar(temporarySidecarPath)
-        wrapSidecarRepositoryError("write", path.join(STATE_NOTES_DIRECTORY, `${canonicalSidecar.key}.json`), error)
+        wrapSidecarRepositoryError("write", path.join(STATE_NOTES_DIRECTORY, `${pathIdentifier}.json`), error)
       }
 
       return sidecarPath

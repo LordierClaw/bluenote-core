@@ -86,6 +86,35 @@ function listSidecarKeys(rootPath: string, testHooks?: RebuildIndexesOptions["te
   }
 }
 
+function findSidecarForRebuild(
+  rootPath: string,
+  sidecars: ReturnType<typeof createSidecarRepository>,
+  expectedKey: string,
+  expectedRelativePath: string,
+  validationErrors: string[],
+) {
+  const legacySidecarPath = sidecars.getSidecarPath(expectedKey)
+
+  if (existsSync(legacySidecarPath)) {
+    return sidecars.read(expectedKey)
+  }
+
+  for (const sidecarKey of listSidecarKeys(rootPath)) {
+    let sidecar
+    try {
+      sidecar = sidecars.readByNoteId(sidecarKey)
+    } catch (error) {
+      validationErrors.push(...collectErrorMessages(error))
+      continue
+    }
+    if (sidecar.key === expectedKey && path.normalize(sidecar.relativePath) === path.normalize(expectedRelativePath)) {
+      return sidecar
+    }
+  }
+
+  return undefined
+}
+
 function readLegacyFrontmatterNote(rawNote: string, relativePath: string) {
   try {
     return parseNoteFile(rawNote, relativePath)
@@ -136,10 +165,10 @@ export function rebuildIndexes(options: RebuildIndexesOptions = {}): RebuildInde
       continue
     }
 
-    const sidecarPath = sidecars.getSidecarPath(expectedKey)
-
     try {
-      if (!existsSync(sidecarPath)) {
+      let sidecar = findSidecarForRebuild(rootPath, sidecars, expectedKey, record.relativePath, validationErrors)
+
+      if (sidecar === undefined) {
         const legacyNote = readLegacyFrontmatterNote(rawNote, record.relativePath)
 
         if (legacyNote !== null) {
@@ -148,7 +177,9 @@ export function rebuildIndexes(options: RebuildIndexesOptions = {}): RebuildInde
         }
       }
 
-      const sidecar = sidecars.read(expectedKey)
+      if (sidecar === undefined) {
+        sidecar = sidecars.read(expectedKey)
+      }
       const plainNote = parsePlainNote(rawNote, record.relativePath)
       let isValid = true
 
@@ -193,6 +224,10 @@ export function rebuildIndexes(options: RebuildIndexesOptions = {}): RebuildInde
 
       try {
         const sidecar = sidecars.read(sidecarKey)
+
+        if (noteRelativePathByKey.get(sidecar.key) === sidecar.relativePath) {
+          continue
+        }
 
         if (path.isAbsolute(sidecar.relativePath)) {
           throw new UsageError(

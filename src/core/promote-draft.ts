@@ -1,5 +1,5 @@
 import path from "node:path"
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
+import fs from "node:fs"
 
 import { resolveBlueNoteRoot, type ResolveBlueNoteRootOptions } from "../config/root"
 import { createNoteKey } from "../domain/note-key"
@@ -9,8 +9,10 @@ import { parsePlainNote, serializePlainNote } from "../storage/plain-note"
 import { getNormalNotesPath } from "../storage/root-layout"
 import { createSidecarRepository } from "../storage/sidecar-repository"
 import type { NoteSidecar } from "../storage/sidecar-schema"
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 import { selectNote } from "./select-note"
 import { UsageError } from "./errors"
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot"
 
 export interface PromoteDraftOptions extends ResolveBlueNoteRootOptions {
   selector: string
@@ -41,8 +43,8 @@ function assertExistingNormalFolder(rootPath: string, destinationFolder: string)
   if (
     (relativePath !== "note" && !relativePath.startsWith("note/"))
     || relativePath.split("/").some((part) => part.startsWith("."))
-    || !existsSync(folderPath)
-    || !statSync(folderPath).isDirectory()
+    || !fs.existsSync(folderPath)
+    || !fs.statSync(folderPath).isDirectory()
   ) {
     throw new UsageError(`Could not promote draft to '${relativePath}'.`, {
       hint: "Choose an existing folder under note/.",
@@ -50,9 +52,9 @@ function assertExistingNormalFolder(rootPath: string, destinationFolder: string)
   }
 
   try {
-    const realRootPath = realpathSync(rootPath)
-    const realNormalRoot = realpathSync(normalRoot)
-    const realFolderPath = realpathSync(folderPath)
+    const realRootPath = fs.realpathSync(rootPath)
+    const realNormalRoot = fs.realpathSync(normalRoot)
+    const realFolderPath = fs.realpathSync(folderPath)
     assertPathInsideRoot(realRootPath, realNormalRoot)
     assertPathInsideRoot(realNormalRoot, realFolderPath)
   } catch (error) {
@@ -68,13 +70,70 @@ function assertExistingNormalFolder(rootPath: string, destinationFolder: string)
 function updateLatestOpenedPathIfMatched(rootPath: string, previousRelativePath: string, nextRelativePath: string): void {
   const latestPath = path.join(rootPath, ".data", "latest-opened-note.json")
   try {
-    const latest = JSON.parse(readFileSync(latestPath, "utf8")) as { relativePath?: unknown }
+    const latest = JSON.parse(fs.readFileSync(latestPath, "utf8")) as { relativePath?: unknown }
     if (latest.relativePath === previousRelativePath) {
-      writeFileSync(latestPath, JSON.stringify({ ...latest, relativePath: nextRelativePath }, null, 2) + "\n", "utf8")
+      fs.writeFileSync(latestPath, JSON.stringify({ ...latest, relativePath: nextRelativePath }, null, 2) + "\n", "utf8")
     }
   } catch {
     // Best-effort TUI state repair; promotion should not depend on optional UI state.
   }
+}
+
+function listSidecarKeys(rootPath: string): string[] {
+  const stateNotesPath = path.join(rootPath, ".data", "notes")
+  if (!fs.existsSync(stateNotesPath)) {
+    return []
+  }
+
+  return fs.readdirSync(stateNotesPath)
+    .filter((entry) => entry.endsWith(".json"))
+    .map((entry) => path.basename(entry, ".json"))
+}
+
+function findSidecarForNote(rootPath: string, sidecars: ReturnType<typeof createSidecarRepository>, key: string, relativePath: string): NoteSidecar | null {
+  const legacySidecarPath = sidecars.getSidecarPath(key)
+  if (fs.existsSync(legacySidecarPath)) {
+    return sidecars.read(key)
+  }
+
+  for (const sidecarKey of listSidecarKeys(rootPath)) {
+    let sidecar: NoteSidecar
+    try {
+      sidecar = sidecars.read(sidecarKey)
+    } catch (error) {
+      if (sidecarKey === key) {
+        throw error
+      }
+      continue
+    }
+    if (sidecar.key === key && path.normalize(sidecar.relativePath) === path.normalize(relativePath)) {
+      return sidecar
+    }
+  }
+
+  return null
+}
+
+function sidecarMetadataKeyExists(rootPath: string, sidecars: ReturnType<typeof createSidecarRepository>, key: string): boolean {
+  if (fs.existsSync(sidecars.getSidecarPath(key))) {
+    return true
+  }
+
+  for (const sidecarKey of listSidecarKeys(rootPath)) {
+    try {
+      if (sidecars.read(sidecarKey).key === key) {
+        return true
+      }
+    } catch {
+      // Ignore malformed unrelated sidecars; selected draft sidecar corruption is validated separately.
+    }
+  }
+
+  return false
+}
+
+function getSidecarPathForMetadata(sidecars: ReturnType<typeof createSidecarRepository>, sidecar: NoteSidecar): string {
+  return sidecar.noteId === undefined ? sidecars.getSidecarPath(sidecar.key) : sidecars.getSidecarPathByNoteId(sidecar.noteId)
 }
 
 export function promoteDraft(options: PromoteDraftOptions): PromoteDraftSummary {
@@ -83,10 +142,13 @@ export function promoteDraft(options: PromoteDraftOptions): PromoteDraftSummary 
   const sidecars = createSidecarRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector, visibility: "drafts" })
   const previousKey = selected.frontmatter.id
+  const syncEntityId = getNoteSyncEntityId(rootPath, selected)
   const previousRelativePath = selected.sourcePath
   const previousNotePath = assertPathInsideRoot(rootPath, path.join(rootPath, previousRelativePath))
-  const previousSidecarPath = sidecars.getSidecarPath(previousKey)
-  const existingSidecar = existsSync(previousSidecarPath) ? sidecars.read(previousKey) : null
+  const existingSidecar = findSidecarForNote(rootPath, sidecars, previousKey, previousRelativePath)
+  const previousSidecarPath = existingSidecar === null
+    ? sidecars.getSidecarPath(previousKey)
+    : getSidecarPathForMetadata(sidecars, existingSidecar)
 
   if (existingSidecar?.type !== "draft" || !previousRelativePath.startsWith("draft/")) {
     throw new UsageError(`Could not promote note '${previousRelativePath}'.`, {
@@ -116,14 +178,13 @@ export function promoteDraft(options: PromoteDraftOptions): PromoteDraftSummary 
 
   const nextRelativePath = joinPortableRelativePath(destination.relativePath, `${nextKey}.md`)
   const nextNotePath = assertPathInsideRoot(rootPath, path.join(rootPath, nextRelativePath))
-  const nextSidecarPath = sidecars.getSidecarPath(nextKey)
-  if ((nextNotePath !== previousNotePath && existsSync(nextNotePath)) || (nextKey !== previousKey && existsSync(nextSidecarPath))) {
+  if ((nextNotePath !== previousNotePath && fs.existsSync(nextNotePath)) || (nextKey !== previousKey && sidecarMetadataKeyExists(rootPath, sidecars, nextKey))) {
     throw new UsageError(`Could not promote draft '${previousRelativePath}'.`, {
       hint: "A note with the generated key already exists in the destination.",
     })
   }
 
-  const plain = parsePlainNote(readFileSync(previousNotePath, "utf8"), previousRelativePath)
+  const plain = parsePlainNote(fs.readFileSync(previousNotePath, "utf8"), previousRelativePath)
   const nextMarkdown = serializePlainNote({ body: plain.body, sourcePath: nextRelativePath })
   const nextSidecar: NoteSidecar = {
     ...existingSidecar,
@@ -134,42 +195,50 @@ export function promoteDraft(options: PromoteDraftOptions): PromoteDraftSummary 
     updatedAt: options.updatedAt ?? new Date().toISOString(),
     archivedAt: null,
   }
+  const nextSidecarPath = getSidecarPathForMetadata(sidecars, nextSidecar)
+  const snapshots = snapshotFiles([
+    previousNotePath,
+    nextNotePath,
+    previousSidecarPath,
+    nextSidecarPath,
+    path.join(rootPath, ".data", "latest-opened-note.json"),
+  ])
 
   let wroteNextNote = false
   let wroteNextSidecar = false
   let removedPreviousNote = false
   let removedPreviousSidecar = false
   try {
-    mkdirSync(path.dirname(nextNotePath), { recursive: true })
-    writeFileSync(nextNotePath, nextMarkdown, { encoding: "utf8", flag: nextNotePath === previousNotePath ? "w" : "wx" })
+    fs.mkdirSync(path.dirname(nextNotePath), { recursive: true })
+    fs.writeFileSync(nextNotePath, nextMarkdown, { encoding: "utf8", flag: nextNotePath === previousNotePath ? "w" : "wx" })
     wroteNextNote = true
     sidecars.write(nextSidecar)
     wroteNextSidecar = true
     if (nextNotePath !== previousNotePath) {
-      rmSync(previousNotePath)
+      fs.rmSync(previousNotePath)
       removedPreviousNote = true
     }
     if (nextSidecarPath !== previousSidecarPath) {
-      rmSync(previousSidecarPath, { force: true })
+      fs.rmSync(previousSidecarPath, { force: true })
       removedPreviousSidecar = true
     }
   } catch (error) {
     const rollbackErrors: unknown[] = []
     if (removedPreviousNote) {
       try {
-        writeFileSync(previousNotePath, serializePlainNote({ body: plain.body, sourcePath: previousRelativePath }), "utf8")
+        fs.writeFileSync(previousNotePath, serializePlainNote({ body: plain.body, sourcePath: previousRelativePath }), "utf8")
       } catch (rollbackError) {
         rollbackErrors.push(rollbackError)
       }
     }
-    if (removedPreviousSidecar && existingSidecar) {
+    if (removedPreviousSidecar || (wroteNextSidecar && nextSidecarPath === previousSidecarPath && existingSidecar)) {
       try { sidecars.write(existingSidecar) } catch (rollbackError) { rollbackErrors.push(rollbackError) }
     }
-    if (wroteNextNote && nextNotePath !== previousNotePath && existsSync(nextNotePath)) {
-      try { rmSync(nextNotePath, { force: true }) } catch (rollbackError) { rollbackErrors.push(rollbackError) }
+    if (wroteNextNote && nextNotePath !== previousNotePath && fs.existsSync(nextNotePath)) {
+      try { fs.rmSync(nextNotePath, { force: true }) } catch (rollbackError) { rollbackErrors.push(rollbackError) }
     }
-    if (wroteNextSidecar && nextSidecarPath !== previousSidecarPath && existsSync(nextSidecarPath)) {
-      try { rmSync(nextSidecarPath, { force: true }) } catch (rollbackError) { rollbackErrors.push(rollbackError) }
+    if (wroteNextSidecar && nextSidecarPath !== previousSidecarPath && fs.existsSync(nextSidecarPath)) {
+      try { fs.rmSync(nextSidecarPath, { force: true }) } catch (rollbackError) { rollbackErrors.push(rollbackError) }
     }
     throw new UsageError(`Could not promote draft '${previousRelativePath}'.`, {
       hint: "Ensure the draft, destination folder, and sidecars are writable inside BLUENOTE_ROOT.",
@@ -178,5 +247,24 @@ export function promoteDraft(options: PromoteDraftOptions): PromoteDraftSummary 
   }
 
   updateLatestOpenedPathIfMatched(rootPath, previousRelativePath, nextRelativePath)
+  try {
+    recordSyncMutationBestEffort(rootPath, {
+      notes: [{
+        entityId: syncEntityId,
+        markedAt: nextSidecar.updatedAt,
+        metadata: {
+          key: nextKey,
+          previousKey,
+          previousRelativePath,
+          relativePath: nextRelativePath,
+          title,
+        },
+      }],
+      folders: [{ relativePath: destination.relativePath, markedAt: nextSidecar.updatedAt }],
+    })
+  } catch (error) {
+    restoreFileSnapshots(snapshots)
+    throw error
+  }
   return { previousKey, key: nextKey, title, previousRelativePath, relativePath: nextRelativePath, notePath: nextNotePath }
 }

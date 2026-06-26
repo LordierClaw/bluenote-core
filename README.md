@@ -10,9 +10,10 @@ This repo owns:
 - plain Markdown note files plus sidecar metadata
 - search/index semantics
 - AI configuration, queue, provider, prompt, and description-generation services
+- schema 3 workspace identity and local sync state primitives
 - public core APIs consumed by distribution and client packages
 
-It intentionally does not include terminal UI, browser UI, OpenTUI rendering, CLI presentation, editor integration, clipboard integration, or distribution command routing.
+It intentionally does not include terminal UI, browser UI, OpenTUI rendering, CLI presentation, editor integration, clipboard integration, distribution command routing, hosted auth/security, or daemon lifecycle UX.
 
 ## Install
 
@@ -50,6 +51,26 @@ import { createBlueNoteCore, createNote, searchNotes } from "@lordierclaw/blueno
 ```
 
 Do not import `src/*`, `dist/*`, tests, or other private paths. Supported public entrypoints are the package root, `./search/contains-match`, `./api/daemon-contract`, and `./package.json`.
+
+## Sync primitives
+
+Core remains local-first: standalone remains the default runtime mode for new and existing managed roots. New workspaces initialize with schema 3 metadata, including a stable workspace identity and immutable note IDs stored in sidecar metadata under `.data/notes/`.
+
+The package root exposes core sync APIs for clients and the distribution package:
+
+```ts
+const core = createBlueNoteCore({ rootPath })
+
+core.sync.status()
+core.sync.link({ mode: "seed-empty-server-from-local", serverUrl, workspaceId })
+core.sync.now({ transport })
+core.sync.repair()
+core.sync.unlink()
+```
+
+These sync APIs are core primitives, not full hosted auth/security. They provide local runtime mode, dirty/tombstone/status repositories, whole-note client/server protocol helpers, in-process/HTTP transport adapters, structured redacted sync logs, and non-mutating repair dry-run reports. Daemon auth/TLS are out of scope for v1 core sync; a future gateway or distribution daemon plan owns authentication, TLS, users, and server lifecycle hardening.
+
+The distribution CLI owns `bluenote sync ...` UX in a follow-up repo plan. Client packages should call the package-root APIs above rather than importing private sync modules directly.
 
 ## Scripts
 
@@ -95,7 +116,7 @@ Release-like Git dependencies must be pinned to immutable commits or tags and in
 
 - Runtime target: Node.js `>=16.14 <17 || >=18`.
 - Package tooling uses npm and TypeScript.
-- Core workflows are local-first and do not require accounts, sync services, hosted backends, or cloud storage.
+- Core workflows are local-first and standalone by default; sync-client behavior is opt-in through caller-owned APIs and transport configuration.
 - Optional AI provider calls are explicit/queued by clients and should not block normal local note workflows.
 
 ## Related packages

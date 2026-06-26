@@ -7,9 +7,11 @@ export interface CreateNoteOptions extends ResolveBlueNoteRootOptions {
     destinationFolder?: string;
     clock?: Clock;
     randomSource?: () => number;
+    noteIdGenerator?: () => string;
     enqueueAi?: boolean;
 }
 export interface CreateNoteSummary {
+    noteId: string;
     key: string;
     title: string;
     description: string;

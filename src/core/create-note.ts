@@ -1,5 +1,5 @@
 import path from "node:path"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, rmSync } from "node:fs"
 
 import { resolveBlueNoteRoot, type ResolveBlueNoteRootOptions } from "../config/root"
 import { enqueueDescribeNoteIfAiEnabled } from "../ai/enqueue-describe-note"
@@ -8,8 +8,14 @@ import { createNoteDescription } from "../domain/note-description"
 import { createDraftNoteKey, createNoteKey } from "../domain/note-key"
 import { rebuildIndexes } from "./rebuild-indexes"
 import { systemClock, type Clock } from "../platform/clock"
+import { createNoteId } from "../platform/ids"
 import { createNoteRepository } from "../storage/note-repository"
 import { ensureManagedRoot, getStateNotesPath } from "../storage/root-layout"
+import { createSidecarRepository } from "../storage/sidecar-repository"
+import { recordSyncMutationBestEffort } from "../sync/mutation-tracking"
+import { readSyncRuntimeMode } from "../sync/runtime-mode"
+
+const STORAGE_SAFE_NOTE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 
 export interface CreateNoteOptions extends ResolveBlueNoteRootOptions {
   type?: "draft" | "normal"
@@ -18,10 +24,12 @@ export interface CreateNoteOptions extends ResolveBlueNoteRootOptions {
   destinationFolder?: string
   clock?: Clock
   randomSource?: () => number
+  noteIdGenerator?: () => string
   enqueueAi?: boolean
 }
 
 export interface CreateNoteSummary {
+  noteId: string
   key: string
   title: string
   description: string
@@ -33,6 +41,7 @@ export interface CreateNoteSummary {
 function listExistingCreateKeys(rootPath: string, repository: ReturnType<typeof createNoteRepository>): Set<string> {
   const existingKeys = new Set(repository.listNotePaths().map((record) => path.basename(record.relativePath, ".md")))
   const stateNotesPath = getStateNotesPath(rootPath)
+  const sidecars = createSidecarRepository(rootPath)
 
   if (!existsSync(stateNotesPath)) {
     return existingKeys
@@ -43,7 +52,13 @@ function listExistingCreateKeys(rootPath: string, repository: ReturnType<typeof 
       continue
     }
 
-    existingKeys.add(path.basename(entry.name, ".json"))
+    const storageIdentifier = path.basename(entry.name, ".json")
+
+    try {
+      existingKeys.add(sidecars.read(storageIdentifier).key)
+    } catch {
+      existingKeys.add(storageIdentifier)
+    }
   }
   return existingKeys
 }
@@ -61,6 +76,19 @@ function enqueueAiDescriptionAfterCreate(
   }, { clock: input.clock, warn: (message) => console.warn(message) })
 }
 
+function shouldEnqueueLocalAiDescription(rootPath: string): boolean {
+  try {
+    return readSyncRuntimeMode(rootPath).mode !== "sync-client"
+  } catch {
+    return true
+  }
+}
+
+
+function rollbackCreatedNoteArtifacts(rootPath: string, created: { notePath: string }, noteId: string): void {
+  rmSync(created.notePath, { force: true })
+  rmSync(createSidecarRepository(rootPath).getSidecarPathByNoteId(noteId), { force: true })
+}
 
 export function createNote(options: CreateNoteOptions): CreateNoteSummary {
   const rootPath = ensureManagedRoot(resolveBlueNoteRoot(options))
@@ -68,6 +96,12 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
   const timestamp = clock.now().toISOString()
   const repository = createNoteRepository(rootPath)
   const existingKeys = listExistingCreateKeys(rootPath, repository)
+  const noteId = (options.noteIdGenerator ?? createNoteId)()
+  if (!STORAGE_SAFE_NOTE_ID_PATTERN.test(noteId)) {
+    throw new UsageError("Generated noteId must be a non-empty storage-safe string.", {
+      hint: "Use a note ID containing only letters, numbers, underscores, and hyphens.",
+    })
+  }
   const type = options.type ?? "draft"
   let title: string
   let key: string
@@ -112,6 +146,7 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
 
   const description = createNoteDescription(options.body ?? "")
   const created = repository.create({
+    noteId,
     frontmatter: {
       id: key,
       schemaVersion: 1,
@@ -125,6 +160,20 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
     destination,
   })
 
+  try {
+    recordSyncMutationBestEffort(rootPath, {
+      notes: [{
+        entityId: noteId,
+        markedAt: timestamp,
+        metadata: { key, relativePath: created.relativePath, title },
+      }],
+      folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
+    })
+  } catch (error) {
+    rollbackCreatedNoteArtifacts(rootPath, created, noteId)
+    throw error
+  }
+
   const rebuildSummary = rebuildIndexes({ override: rootPath })
 
   if (rebuildSummary.validationErrors.length > 0) {
@@ -136,7 +185,7 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
     )
   }
 
-  if (options.enqueueAi !== false) {
+  if (options.enqueueAi !== false && shouldEnqueueLocalAiDescription(rootPath)) {
     enqueueAiDescriptionAfterCreate(rootPath, {
       key,
       title,
@@ -148,6 +197,7 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
   }
 
   return {
+    noteId,
     key,
     title,
     description,

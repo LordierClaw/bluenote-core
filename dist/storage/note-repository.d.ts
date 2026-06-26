@@ -1,5 +1,6 @@
 import type { NoteFrontmatter, ParsedNote } from "./note-schema.js";
 export interface CreateStoredNoteInput {
+    noteId?: string;
     frontmatter: NoteFrontmatter;
     body: string;
     destination?: CreateStoredNoteDestination;

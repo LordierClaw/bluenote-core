@@ -11,6 +11,22 @@ import { promoteDraft, type PromoteDraftOptions, type PromoteDraftSummary } from
 import { searchNotes, type SearchNoteMatch } from "./core/search-notes"
 import { rebuildIndexes, type RebuildIndexesOptions, type RebuildIndexesSummary } from "./core/rebuild-indexes"
 import type { NoteVisibilityOptions } from "./core/note-visibility"
+import {
+  getCoreSyncStatus,
+  linkCoreSync,
+  repairCoreSync,
+  syncCoreNow,
+  unlinkCoreSync,
+  type SyncLinkOptions,
+  type SyncLinkSummary,
+  type SyncNowOptions,
+  type SyncNowSummary,
+  type SyncRepairOptions,
+  type SyncRepairSummary,
+  type SyncStatusView,
+  type SyncTransport,
+  type SyncUnlinkSummary,
+} from "./sync/core-sync"
 
 export * from "./core/errors"
 export type * from "./core/types"
@@ -66,6 +82,30 @@ export * from "./storage/root-layout"
 export * from "./storage/sidecar-repository"
 export * from "./storage/sidecar-schema"
 export * from "./storage/state-manifest"
+export * from "./sync/core-sync"
+export * from "./sync/types"
+export * from "./sync/protocol"
+export * from "./sync/client-service"
+export * from "./sync/server-service"
+export * from "./sync/http-transport"
+export * from "./sync/sync-log"
+export * from "./sync/dirty-repository"
+export * from "./sync/folder-repository"
+export {
+  ensureSyncDatabase,
+  getSyncDatabasePath,
+  SYNC_SCHEMA_VERSION,
+  serializeSyncMetadata,
+  parseSyncMetadata,
+} from "./sync/sync-db"
+export type {
+  EnsureSyncDatabaseOptions,
+  EnsureSyncDatabaseResult,
+  SyncDatabaseRole,
+  SyncJsonObject,
+} from "./sync/sync-db"
+export * from "./sync/status-repository"
+export * from "./sync/tombstone-repository"
 export * from "./search/contains-match"
 
 export type {
@@ -85,6 +125,8 @@ export type {
 
 export interface BlueNoteCoreConfig extends Omit<ResolveBlueNoteRootOptions, "override"> {
   rootPath?: string
+  syncTransport?: SyncTransport
+  syncReplicaId?: string
 }
 
 export type BlueNoteCoreRootOptions = Omit<ResolveBlueNoteRootOptions, "override"> & {
@@ -118,6 +160,13 @@ export interface BlueNoteCore {
   }
   search: {
     search(query: string, options?: SearchOptions): SearchNoteMatch[]
+  }
+  sync: {
+    status(options?: BlueNoteCoreRootOptions): SyncStatusView
+    link(options: SyncLinkOptions & BlueNoteCoreRootOptions): SyncLinkSummary
+    unlink(options?: BlueNoteCoreRootOptions): SyncUnlinkSummary
+    now(options?: SyncNowOptions & BlueNoteCoreRootOptions): SyncNowSummary
+    repair(options?: SyncRepairOptions & BlueNoteCoreRootOptions): SyncRepairSummary
   }
   rebuild(options?: RebuildOptions): RebuildIndexesSummary
 }
@@ -174,6 +223,27 @@ export function createBlueNoteCore(config: BlueNoteCoreConfig = {}): BlueNoteCor
     search: {
       search(query, options = {}) {
         return searchNotes(query, withRoot(config, options))
+      },
+    },
+    sync: {
+      status(options = {}) {
+        return getCoreSyncStatus(applyRoot(config, options))
+      },
+      link(options) {
+        return linkCoreSync(withRoot(config, options))
+      },
+      unlink(options = {}) {
+        return unlinkCoreSync(applyRoot(config, options))
+      },
+      now(options = {}) {
+        return syncCoreNow({
+          transport: options.transport ?? config.syncTransport,
+          replicaId: options.replicaId ?? config.syncReplicaId,
+          ...withRoot(config, options),
+        })
+      },
+      repair(options = {}) {
+        return repairCoreSync(withRoot(config, options))
       },
     },
     rebuild(options = {}) {

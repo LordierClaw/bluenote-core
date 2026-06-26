@@ -70,6 +70,57 @@ test("sidecar repository writes canonical metadata under .data/notes", async () 
   }
 })
 
+test("sidecar repository writes schema 3 sidecars under note id paths", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sidecar-repository-note-id-write-"))
+
+  try {
+    const repository = createSidecarRepository(rootPath)
+    const schema3Sidecar = {
+      ...FIXED_SIDECAR,
+      noteId: "note_abc",
+      key: "human-title",
+      title: "Human Title",
+      relativePath: "note/human-title.md",
+    }
+
+    const sidecarPath = repository.write(schema3Sidecar)
+
+    assert.equal(sidecarPath, path.join(rootPath, ".data", "notes", "note_abc.json"))
+    assert.equal(repository.getSidecarPathByNoteId("note_abc"), sidecarPath)
+
+    const sidecarJson = await readFile(sidecarPath, "utf8")
+    assert.deepEqual(JSON.parse(sidecarJson), schema3Sidecar)
+    await assert.rejects(() => access(path.join(rootPath, ".data", "notes", "human-title.json")), {
+      code: "ENOENT",
+    })
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+test("sidecar repository reads schema 3 sidecars by note id while preserving key reads", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sidecar-repository-note-id-read-"))
+
+  try {
+    const repository = createSidecarRepository(rootPath)
+    const schema3Sidecar = {
+      ...FIXED_SIDECAR,
+      noteId: "note_abc",
+      key: "human-title",
+      title: "Human Title",
+      relativePath: "note/human-title.md",
+    }
+
+    repository.write(schema3Sidecar)
+    assert.deepEqual(repository.readByNoteId("note_abc"), schema3Sidecar)
+
+    repository.write(FIXED_SIDECAR)
+    assert.deepEqual(repository.read(FIXED_SIDECAR.key), FIXED_SIDECAR)
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("sidecar repository create-path write failures do not leave a partial sidecar behind", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sidecar-repository-create-rollback-"))
 
@@ -189,6 +240,31 @@ test("sidecar repository rejects missing required sidecar fields when writing", 
   }
 })
 
+test("sidecar repository write validation reports noteId paths when noteId exists", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sidecar-repository-note-id-path-"))
+
+  try {
+    const repository = createSidecarRepository(rootPath)
+
+    assert.throws(
+      () =>
+        repository.write({
+          ...FIXED_SIDECAR,
+          noteId: "01JZ4B0XQJ9HZM6QW4HD3Z9V6A",
+          updatedAt: "not-a-timestamp",
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof InvalidFrontmatterError)
+        assert.match(error.message, /01JZ4B0XQJ9HZM6QW4HD3Z9V6A\.json/i)
+        assert.match(error.message, /updatedAt/i)
+        return true
+      },
+    )
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("sidecar repository rejects invalid stored sidecars", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sidecar-repository-invalid-read-"))
 
@@ -226,13 +302,25 @@ test("sidecar repository rejects invalid stored sidecars", async () => {
   }
 })
 
-test("sidecar repository rejects keys that escape .data/notes", async () => {
-  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sidecar-repository-invalid-key-"))
+test("sidecar repository rejects keys and note ids that escape .data/notes", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sidecar-repository-invalid-path-"))
 
   try {
     const repository = createSidecarRepository(rootPath)
 
     assert.throws(() => repository.getSidecarPath("../escaped"), /outside the managed root/i)
+    assert.throws(() => repository.read("../escaped"), /outside the managed root/i)
+    assert.throws(() => repository.getSidecarPathByNoteId("../escaped"), /outside the managed root/i)
+    assert.throws(
+      () =>
+        repository.write({
+          ...FIXED_SIDECAR,
+          noteId: "../escaped",
+          key: "safe-key",
+          relativePath: "note/safe-key.md",
+        }),
+      /noteId/i,
+    )
   } finally {
     await rm(rootPath, { recursive: true, force: true })
   }

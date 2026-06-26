@@ -12,6 +12,9 @@ export const APP_STATE_LOGS_DIRECTORY = path.join(APP_STATE_DIRECTORY, "logs")
 export const APP_STATE_AI_DIRECTORY = path.join(APP_STATE_DIRECTORY, "ai")
 export const APP_STATE_AI_PROMPTS_DIRECTORY = path.join(APP_STATE_AI_DIRECTORY, "prompts")
 export const APP_STATE_AI_LOGS_DIRECTORY = path.join(APP_STATE_AI_DIRECTORY, "logs")
+export const APP_STATE_SYNC_DIRECTORY = path.join(APP_STATE_DIRECTORY, "sync")
+export const APP_STATE_SYNC_LOGS_DIRECTORY = path.join(APP_STATE_SYNC_DIRECTORY, "logs")
+export const APP_STATE_SYNC_DATABASE_FILENAME = "sync.sqlite"
 export const APP_STATE_AI_CONFIG_FILENAME = "config.json"
 export const APP_STATE_AI_QUEUE_FILENAME = "queue.json"
 export const LEGACY_STATE_DIRECTORY = ".state"
@@ -22,7 +25,7 @@ export const STATE_RECOVERY_DIRECTORY = APP_STATE_RECOVERY_DIRECTORY
 export const STATE_TMP_DIRECTORY = APP_STATE_TMP_DIRECTORY
 export const STATE_LOGS_DIRECTORY = APP_STATE_LOGS_DIRECTORY
 export const STATE_MANIFEST_FILENAME = "manifest.json"
-export const STORAGE_SCHEMA_VERSION = 2
+export const STORAGE_SCHEMA_VERSION = 3
 
 export interface ResolveBlueNoteRootOptions {
   override?: string

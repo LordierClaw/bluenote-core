@@ -1,5 +1,5 @@
 import path from "node:path";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import fs from "node:fs";
 import { resolveBlueNoteRoot } from "../config/root.js";
 import { createNoteKey } from "../domain/note-key.js";
 import { assertPathInsideRoot, joinPortableRelativePath } from "../platform/path-safety.js";
@@ -7,8 +7,10 @@ import { createNoteRepository } from "../storage/note-repository.js";
 import { parsePlainNote, serializePlainNote } from "../storage/plain-note.js";
 import { getNormalNotesPath } from "../storage/root-layout.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
 import { selectNote } from "./select-note.js";
 import { UsageError } from "./errors.js";
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot.js";
 function normalizeFolderRelativePath(relativePath) {
     return relativePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
@@ -18,16 +20,16 @@ function assertExistingNormalFolder(rootPath, destinationFolder) {
     const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
     if ((relativePath !== "note" && !relativePath.startsWith("note/"))
         || relativePath.split("/").some((part) => part.startsWith("."))
-        || !existsSync(folderPath)
-        || !statSync(folderPath).isDirectory()) {
+        || !fs.existsSync(folderPath)
+        || !fs.statSync(folderPath).isDirectory()) {
         throw new UsageError(`Could not promote draft to '${relativePath}'.`, {
             hint: "Choose an existing folder under note/.",
         });
     }
     try {
-        const realRootPath = realpathSync(rootPath);
-        const realNormalRoot = realpathSync(normalRoot);
-        const realFolderPath = realpathSync(folderPath);
+        const realRootPath = fs.realpathSync(rootPath);
+        const realNormalRoot = fs.realpathSync(normalRoot);
+        const realFolderPath = fs.realpathSync(folderPath);
         assertPathInsideRoot(realRootPath, realNormalRoot);
         assertPathInsideRoot(realNormalRoot, realFolderPath);
     }
@@ -42,14 +44,64 @@ function assertExistingNormalFolder(rootPath, destinationFolder) {
 function updateLatestOpenedPathIfMatched(rootPath, previousRelativePath, nextRelativePath) {
     const latestPath = path.join(rootPath, ".data", "latest-opened-note.json");
     try {
-        const latest = JSON.parse(readFileSync(latestPath, "utf8"));
+        const latest = JSON.parse(fs.readFileSync(latestPath, "utf8"));
         if (latest.relativePath === previousRelativePath) {
-            writeFileSync(latestPath, JSON.stringify({ ...latest, relativePath: nextRelativePath }, null, 2) + "\n", "utf8");
+            fs.writeFileSync(latestPath, JSON.stringify({ ...latest, relativePath: nextRelativePath }, null, 2) + "\n", "utf8");
         }
     }
     catch {
         // Best-effort TUI state repair; promotion should not depend on optional UI state.
     }
+}
+function listSidecarKeys(rootPath) {
+    const stateNotesPath = path.join(rootPath, ".data", "notes");
+    if (!fs.existsSync(stateNotesPath)) {
+        return [];
+    }
+    return fs.readdirSync(stateNotesPath)
+        .filter((entry) => entry.endsWith(".json"))
+        .map((entry) => path.basename(entry, ".json"));
+}
+function findSidecarForNote(rootPath, sidecars, key, relativePath) {
+    const legacySidecarPath = sidecars.getSidecarPath(key);
+    if (fs.existsSync(legacySidecarPath)) {
+        return sidecars.read(key);
+    }
+    for (const sidecarKey of listSidecarKeys(rootPath)) {
+        let sidecar;
+        try {
+            sidecar = sidecars.read(sidecarKey);
+        }
+        catch (error) {
+            if (sidecarKey === key) {
+                throw error;
+            }
+            continue;
+        }
+        if (sidecar.key === key && path.normalize(sidecar.relativePath) === path.normalize(relativePath)) {
+            return sidecar;
+        }
+    }
+    return null;
+}
+function sidecarMetadataKeyExists(rootPath, sidecars, key) {
+    if (fs.existsSync(sidecars.getSidecarPath(key))) {
+        return true;
+    }
+    for (const sidecarKey of listSidecarKeys(rootPath)) {
+        try {
+            if (sidecars.read(sidecarKey).key === key) {
+                return true;
+            }
+        }
+        catch {
+            // Ignore malformed unrelated sidecars; selected draft sidecar corruption is validated separately.
+        }
+    }
+    return false;
+}
+function getSidecarPathForMetadata(sidecars, sidecar) {
+    return sidecar.noteId === undefined ? sidecars.getSidecarPath(sidecar.key) : sidecars.getSidecarPathByNoteId(sidecar.noteId);
 }
 export function promoteDraft(options) {
     const rootPath = resolveBlueNoteRoot(options);
@@ -57,10 +109,13 @@ export function promoteDraft(options) {
     const sidecars = createSidecarRepository(rootPath);
     const selected = selectNote({ repository, selector: options.selector, visibility: "drafts" });
     const previousKey = selected.frontmatter.id;
+    const syncEntityId = getNoteSyncEntityId(rootPath, selected);
     const previousRelativePath = selected.sourcePath;
     const previousNotePath = assertPathInsideRoot(rootPath, path.join(rootPath, previousRelativePath));
-    const previousSidecarPath = sidecars.getSidecarPath(previousKey);
-    const existingSidecar = existsSync(previousSidecarPath) ? sidecars.read(previousKey) : null;
+    const existingSidecar = findSidecarForNote(rootPath, sidecars, previousKey, previousRelativePath);
+    const previousSidecarPath = existingSidecar === null
+        ? sidecars.getSidecarPath(previousKey)
+        : getSidecarPathForMetadata(sidecars, existingSidecar);
     if (existingSidecar?.type !== "draft" || !previousRelativePath.startsWith("draft/")) {
         throw new UsageError(`Could not promote note '${previousRelativePath}'.`, {
             hint: "Only draft notes under draft/ can be saved as normal notes.",
@@ -87,13 +142,12 @@ export function promoteDraft(options) {
     }
     const nextRelativePath = joinPortableRelativePath(destination.relativePath, `${nextKey}.md`);
     const nextNotePath = assertPathInsideRoot(rootPath, path.join(rootPath, nextRelativePath));
-    const nextSidecarPath = sidecars.getSidecarPath(nextKey);
-    if ((nextNotePath !== previousNotePath && existsSync(nextNotePath)) || (nextKey !== previousKey && existsSync(nextSidecarPath))) {
+    if ((nextNotePath !== previousNotePath && fs.existsSync(nextNotePath)) || (nextKey !== previousKey && sidecarMetadataKeyExists(rootPath, sidecars, nextKey))) {
         throw new UsageError(`Could not promote draft '${previousRelativePath}'.`, {
             hint: "A note with the generated key already exists in the destination.",
         });
     }
-    const plain = parsePlainNote(readFileSync(previousNotePath, "utf8"), previousRelativePath);
+    const plain = parsePlainNote(fs.readFileSync(previousNotePath, "utf8"), previousRelativePath);
     const nextMarkdown = serializePlainNote({ body: plain.body, sourcePath: nextRelativePath });
     const nextSidecar = {
         ...existingSidecar,
@@ -104,22 +158,30 @@ export function promoteDraft(options) {
         updatedAt: options.updatedAt ?? new Date().toISOString(),
         archivedAt: null,
     };
+    const nextSidecarPath = getSidecarPathForMetadata(sidecars, nextSidecar);
+    const snapshots = snapshotFiles([
+        previousNotePath,
+        nextNotePath,
+        previousSidecarPath,
+        nextSidecarPath,
+        path.join(rootPath, ".data", "latest-opened-note.json"),
+    ]);
     let wroteNextNote = false;
     let wroteNextSidecar = false;
     let removedPreviousNote = false;
     let removedPreviousSidecar = false;
     try {
-        mkdirSync(path.dirname(nextNotePath), { recursive: true });
-        writeFileSync(nextNotePath, nextMarkdown, { encoding: "utf8", flag: nextNotePath === previousNotePath ? "w" : "wx" });
+        fs.mkdirSync(path.dirname(nextNotePath), { recursive: true });
+        fs.writeFileSync(nextNotePath, nextMarkdown, { encoding: "utf8", flag: nextNotePath === previousNotePath ? "w" : "wx" });
         wroteNextNote = true;
         sidecars.write(nextSidecar);
         wroteNextSidecar = true;
         if (nextNotePath !== previousNotePath) {
-            rmSync(previousNotePath);
+            fs.rmSync(previousNotePath);
             removedPreviousNote = true;
         }
         if (nextSidecarPath !== previousSidecarPath) {
-            rmSync(previousSidecarPath, { force: true });
+            fs.rmSync(previousSidecarPath, { force: true });
             removedPreviousSidecar = true;
         }
     }
@@ -127,13 +189,13 @@ export function promoteDraft(options) {
         const rollbackErrors = [];
         if (removedPreviousNote) {
             try {
-                writeFileSync(previousNotePath, serializePlainNote({ body: plain.body, sourcePath: previousRelativePath }), "utf8");
+                fs.writeFileSync(previousNotePath, serializePlainNote({ body: plain.body, sourcePath: previousRelativePath }), "utf8");
             }
             catch (rollbackError) {
                 rollbackErrors.push(rollbackError);
             }
         }
-        if (removedPreviousSidecar && existingSidecar) {
+        if (removedPreviousSidecar || (wroteNextSidecar && nextSidecarPath === previousSidecarPath && existingSidecar)) {
             try {
                 sidecars.write(existingSidecar);
             }
@@ -141,17 +203,17 @@ export function promoteDraft(options) {
                 rollbackErrors.push(rollbackError);
             }
         }
-        if (wroteNextNote && nextNotePath !== previousNotePath && existsSync(nextNotePath)) {
+        if (wroteNextNote && nextNotePath !== previousNotePath && fs.existsSync(nextNotePath)) {
             try {
-                rmSync(nextNotePath, { force: true });
+                fs.rmSync(nextNotePath, { force: true });
             }
             catch (rollbackError) {
                 rollbackErrors.push(rollbackError);
             }
         }
-        if (wroteNextSidecar && nextSidecarPath !== previousSidecarPath && existsSync(nextSidecarPath)) {
+        if (wroteNextSidecar && nextSidecarPath !== previousSidecarPath && fs.existsSync(nextSidecarPath)) {
             try {
-                rmSync(nextSidecarPath, { force: true });
+                fs.rmSync(nextSidecarPath, { force: true });
             }
             catch (rollbackError) {
                 rollbackErrors.push(rollbackError);
@@ -163,6 +225,26 @@ export function promoteDraft(options) {
         });
     }
     updateLatestOpenedPathIfMatched(rootPath, previousRelativePath, nextRelativePath);
+    try {
+        recordSyncMutationBestEffort(rootPath, {
+            notes: [{
+                    entityId: syncEntityId,
+                    markedAt: nextSidecar.updatedAt,
+                    metadata: {
+                        key: nextKey,
+                        previousKey,
+                        previousRelativePath,
+                        relativePath: nextRelativePath,
+                        title,
+                    },
+                }],
+            folders: [{ relativePath: destination.relativePath, markedAt: nextSidecar.updatedAt }],
+        });
+    }
+    catch (error) {
+        restoreFileSnapshots(snapshots);
+        throw error;
+    }
     return { previousKey, key: nextKey, title, previousRelativePath, relativePath: nextRelativePath, notePath: nextNotePath };
 }
 //# sourceMappingURL=promote-draft.js.map

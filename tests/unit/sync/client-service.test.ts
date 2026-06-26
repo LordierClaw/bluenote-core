@@ -1,0 +1,1387 @@
+import { describe, test } from "vitest"
+import assert from "node:assert/strict"
+import os from "node:os"
+import path from "node:path"
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdtemp, rm } from "node:fs/promises"
+
+import { createBlueNoteCore, createDirtyRecordRepository, createFolderRepository, getCoreSyncStatus, type SyncTransport } from "../../../src"
+import { createSyncClientService } from "../../../src/sync/client-service"
+import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
+import { setSyncRuntimeMode } from "../../../src/sync/runtime-mode"
+import { withSyncDatabase } from "../../../src/sync/sync-db"
+import type { PullChangesRequest, PullChangesResponse, PushRequest, PushResponse } from "../../../src/sync/protocol"
+
+const workspaceId = "workspace-client-service"
+const replicaId = "replica-client-a"
+
+interface TestTransport extends SyncTransport {
+  calls: string[]
+  pushes: Array<PushRequest & { noteBodies?: Record<string, string> }>
+}
+
+async function withRoot<T>(callback: (rootPath: string) => T | Promise<T>): Promise<T> {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-client-service-"))
+  try {
+    return await callback(rootPath)
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+}
+
+function makeTransport(options: {
+  pull?: (request: PullChangesRequest) => PullChangesResponse
+  push?: (request: PushRequest & { noteBodies?: Record<string, string> }) => PushResponse
+  bodies?: Record<string, string>
+} = {}): TestTransport {
+  const pushes: Array<PushRequest & { noteBodies?: Record<string, string> }> = []
+  const calls: string[] = []
+  return {
+    calls,
+    pushes,
+    pull(request) {
+      calls.push("pull")
+      return options.pull?.(request) ?? { workspaceId: request.workspaceId, fromSequence: request.sinceSequence, toSequence: request.sinceSequence, hasMore: false, changes: [] }
+    },
+    push(request) {
+      calls.push("push")
+      pushes.push(request)
+      return options.push?.(request) ?? {
+        accepted: request.records.map((record, index) => ({ entityType: record.entityType, entityId: record.entityId, serverRevision: index + 1 })),
+        replacedByServer: [],
+        rejected: [],
+        serverSequence: request.baseSequence + request.records.length,
+      }
+    },
+    downloadNoteBody(noteId) {
+      calls.push(`download:${noteId}`)
+      return { workspaceId, noteId, body: options.bodies?.[noteId] ?? "Server body.\n" }
+    },
+  }
+}
+
+function enableClient(rootPath: string): void {
+  createBlueNoteCore({ rootPath }).init()
+  setSyncRuntimeMode(rootPath, { mode: "sync-client", workspaceId })
+}
+
+function listRecoveryOrConflictFiles(rootPath: string): string[] {
+  const found: string[] = []
+  function visit(directoryPath: string): void {
+    if (!existsSync(directoryPath)) return
+    for (const entry of readdirSync(directoryPath, { withFileTypes: true })) {
+      const entryPath = path.join(directoryPath, entry.name)
+      if (entry.isDirectory()) visit(entryPath)
+      if (entry.isFile() && /conflict|recovery/i.test(entry.name)) found.push(entryPath)
+    }
+  }
+  visit(rootPath)
+  return found
+}
+
+describe("sync client service", () => {
+  test("sync cycle pulls before pushing dirty records and clears accepted pushes", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Local Dirty",
+        body: "Local dirty body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-local-dirty",
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      const sidecars = createSidecarRepository(rootPath)
+      sidecars.write({ ...sidecars.readByNoteId(note.noteId), description: "Generated local description." })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+      dirty.markDirty({
+        entityType: "note",
+        entityId: note.noteId,
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { key: note.key, relativePath: note.relativePath, title: "Local Dirty" },
+      })
+      const transport = makeTransport()
+
+      const summary = createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
+
+      assert.deepEqual(transport.calls, ["pull", "push", "pull"])
+      assert.equal(transport.pushes.length, 1)
+      assert.equal(transport.pushes[0].records.length, 1)
+      assert.equal(transport.pushes[0].records[0].entityId, note.noteId)
+      assert.equal(transport.pushes[0].records[0].metadata.description, "Generated local description.")
+      assert.equal(transport.pushes[0].noteBodies?.[note.noteId], "Local dirty body.\n")
+      assert.deepEqual(summary, { status: "synced", pushed: 1, pulled: 0 })
+      assert.deepEqual(dirty.listDirtyRecords(), [])
+    })
+  })
+
+  test("server AI metadata-only pulls do not overwrite or clear local dirty note bodies", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Local Dirty AI",
+        body: "Original synced body.\n",
+        destinationFolder: "note",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-local-ai-dirty",
+        randomSource: () => 46655,
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+      writeFileSync(path.join(rootPath, note.relativePath), "Unsynced local edit.\n", "utf8")
+      dirty.markDirty({
+        entityType: "note",
+        entityId: note.noteId,
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { key: note.key, relativePath: note.relativePath, title: note.title },
+      })
+
+      const transport = makeTransport({
+        pull: (request) => request.sinceSequence === 0 ? {
+          workspaceId: request.workspaceId,
+          fromSequence: 0,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: note.title,
+            relativePath: note.relativePath,
+            bodyAvailable: false,
+            sourceReplicaId: "server-ai",
+            metadata: {
+              key: note.key,
+              title: note.title,
+              description: "Generated server AI description.",
+              relativePath: note.relativePath,
+              ai: { description: { lastProcessedAt: "2026-06-24T01:00:00.000Z" } },
+            },
+          }],
+        } : { workspaceId: request.workspaceId, fromSequence: request.sinceSequence, toSequence: request.sinceSequence, hasMore: false, changes: [] },
+        bodies: { [note.noteId]: "Stale server body that must not be downloaded.\n" },
+      })
+
+      const summary = createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
+
+      assert.deepEqual(transport.calls, ["pull", "push", "pull"])
+      assert.equal(readFileSync(path.join(rootPath, note.relativePath), "utf8"), "Unsynced local edit.\n")
+      assert.equal(createSidecarRepository(rootPath).readByNoteId(note.noteId).description, "Generated server AI description.")
+      assert.equal(transport.pushes.length, 1)
+      assert.equal(transport.pushes[0].records[0].entityId, note.noteId)
+      assert.equal(transport.pushes[0].noteBodies?.[note.noteId], "Unsynced local edit.\n")
+      assert.deepEqual(summary, { status: "synced", pushed: 1, pulled: 1 })
+    })
+  })
+
+
+  test("default replica IDs are unique per root instead of treating sourceReplicaId local as an own echo", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        bodies: { "note-from-default-local": "Remote body from another default client.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "note",
+            entityId: "note-from-default-local",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Default Local",
+            relativePath: "note/default-local.md",
+            bodyAvailable: true,
+            sourceReplicaId: "local",
+            metadata: {
+              key: "default-local",
+              relativePath: "note/default-local.md",
+              title: "Default Local",
+              createdAt: "2026-06-24T01:00:00.000Z",
+              updatedAt: "2026-06-24T01:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.deepEqual(transport.calls, ["pull", "download:note-from-default-local"])
+      assert.equal(readFileSync(path.join(rootPath, "note", "default-local.md"), "utf8"), "Remote body from another default client.\n")
+    })
+  })
+
+
+  test("default replica ID ignores workspace-copied sync database localReplicaId", async () => {
+    await withRoot(async (rootPath) => {
+      enableClient(rootPath)
+      const previousConfigHome = process.env.XDG_CONFIG_HOME
+      const configRoot = await mkdtemp(path.join(os.tmpdir(), "bluenote-sync-client-replica-config-"))
+      process.env.XDG_CONFIG_HOME = configRoot
+      try {
+        withSyncDatabase(rootPath, { role: "client", workspaceId }, (handle) => {
+          handle.db.run("INSERT INTO sync_meta (key, value) VALUES ('localReplicaId', ?)", ["replica_copied_workspace"])
+        }, { save: true })
+        const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+        dirty.markDirty({
+          entityType: "note",
+          entityId: "note-copied-replica",
+          dirtyType: "delete",
+          markedAt: "2026-06-24T03:00:00.000Z",
+          metadata: { relativePath: "note/copied-replica.md" },
+        })
+        const transport = makeTransport()
+
+        createSyncClientService({ rootPath, workspaceId, transport }).syncNow()
+
+        assert.equal(transport.pushes.length, 1)
+        assert.notEqual(transport.pushes[0].replicaId, "replica_copied_workspace")
+        assert.match(transport.pushes[0].replicaId, /^replica_/)
+      } finally {
+        if (previousConfigHome === undefined) {
+          delete process.env.XDG_CONFIG_HOME
+        } else {
+          process.env.XDG_CONFIG_HOME = previousConfigHome
+        }
+        await rm(configRoot, { recursive: true, force: true })
+      }
+    })
+  })
+
+
+  test("pulled renames reject keys owned by another local note", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const synced = core.notes.create({
+        type: "normal",
+        title: "Synced Original",
+        body: "Original body.\n",
+        destinationFolder: "note",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-synced-original",
+      })
+      const local = core.notes.create({
+        type: "normal",
+        title: "Local Duplicate",
+        body: "Local body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-local-duplicate",
+      })
+      const transport = makeTransport({
+        bodies: { [synced.noteId]: "Renamed remote body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "note",
+            entityId: synced.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T04:00:00.000Z",
+            title: "Local Duplicate",
+            relativePath: local.relativePath,
+            bodyAvailable: true,
+            sourceReplicaId: "remote-replica",
+            metadata: {
+              key: local.key,
+              relativePath: local.relativePath,
+              title: "Local Duplicate",
+              createdAt: "2026-06-24T04:00:00.000Z",
+              updatedAt: "2026-06-24T04:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /already owned by another note/,
+      )
+      assert.equal(readFileSync(path.join(rootPath, synced.relativePath), "utf8"), "Original body.\n")
+      assert.equal(readFileSync(path.join(rootPath, local.relativePath), "utf8"), "Local body.\n")
+    })
+  })
+
+
+  test("pulled renames reject keys used by raw Markdown notes", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, ".data", "archive"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const synced = core.notes.create({
+        type: "normal",
+        title: "Synced Raw Original",
+        body: "Original raw body.\n",
+        destinationFolder: "note",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-synced-raw-original",
+      })
+      writeFileSync(path.join(rootPath, ".data", "archive", "raw-collision.md"), "Legacy raw body.\n", "utf8")
+      const transport = makeTransport({
+        bodies: { [synced.noteId]: "Renamed remote body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "note",
+            entityId: synced.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T05:00:00.000Z",
+            title: "Raw Collision",
+            relativePath: "note/raw-collision.md",
+            bodyAvailable: true,
+            sourceReplicaId: "remote-replica",
+            metadata: {
+              key: "raw-collision",
+              relativePath: "note/raw-collision.md",
+              title: "Raw Collision",
+              createdAt: "2026-06-24T05:00:00.000Z",
+              updatedAt: "2026-06-24T05:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /already used by another Markdown note/,
+      )
+      assert.equal(readFileSync(path.join(rootPath, synced.relativePath), "utf8"), "Original raw body.\n")
+      assert.equal(readFileSync(path.join(rootPath, ".data", "archive", "raw-collision.md"), "utf8"), "Legacy raw body.\n")
+      assert.equal(existsSync(path.join(rootPath, "note", "raw-collision.md")), false)
+    })
+  })
+
+  test("sync cycle surfaces rejected pushes and keeps dirty records pending", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      dirty.markDirty({
+        entityType: "note",
+        entityId: "note-rejected",
+        dirtyType: "delete",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/rejected.md" },
+      })
+      const transport = makeTransport({
+        push: (request) => ({
+          accepted: [],
+          replacedByServer: [],
+          rejected: [{
+            entityType: "note",
+            entityId: "note-rejected",
+            code: "PUSH_REJECTED",
+            message: "destination path already exists",
+          }],
+          serverSequence: request.baseSequence,
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /destination path already exists/,
+      )
+      const [pending] = dirty.listDirtyRecords()
+      assert.equal(pending.entityId, "note-rejected")
+      assert.equal(pending.attempts, 1)
+      assert.match(pending.lastError ?? "", /destination path already exists/)
+      const status = getCoreSyncStatus({ override: rootPath })
+      assert.equal(status.failedCount, 1)
+      assert.match(status.lastError ?? "", /destination path already exists/)
+    })
+  })
+
+  test("archiving a synced note pushes a delete tombstone instead of an archived upsert", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Archive Dirty",
+        body: "Archive me remotely.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-archive-dirty",
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+
+      const archived = core.notes.archive(note.key, { clock: { now: () => new Date("2026-06-24T02:00:00.000Z") } })
+      assert.deepEqual(dirty.listDirtyRecords().map((record) => ({
+        entityType: record.entityType,
+        entityId: record.entityId,
+        dirtyType: record.dirtyType,
+        metadata: record.metadata,
+      })), [
+        {
+          entityType: "note",
+          entityId: note.noteId,
+          dirtyType: "delete",
+          metadata: {
+            archivedAt: "2026-06-24T02:00:00.000Z",
+            key: note.key,
+            previousRelativePath: note.relativePath,
+            title: note.title,
+          },
+        },
+      ])
+
+      let pullCount = 0
+      const transport = makeTransport({
+        push: (request) => ({
+          accepted: request.records.map((record) => ({ entityType: record.entityType, entityId: record.entityId, serverRevision: 1 })),
+          replacedByServer: [],
+          rejected: [],
+          serverSequence: 1,
+        }),
+        pull: (request) => {
+          pullCount += 1
+          return {
+            workspaceId: request.workspaceId,
+            fromSequence: request.sinceSequence,
+            toSequence: pullCount === 1 ? 0 : 1,
+            hasMore: false,
+            changes: pullCount === 1 ? [] : [{
+              sequence: 1,
+              entityType: "note",
+              entityId: note.noteId,
+              changeType: "delete",
+              serverRevision: 1,
+              changedAt: "2026-06-24T02:00:01.000Z",
+              relativePath: note.relativePath,
+              bodyAvailable: false,
+              sourceReplicaId: replicaId,
+              metadata: { previousRelativePath: note.relativePath, previousTitle: note.title },
+            }],
+          }
+        },
+      })
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 1, pulled: 1 })
+      assert.equal(transport.pushes.length, 1)
+      assert.equal(transport.pushes[0].records.length, 1)
+      assert.deepEqual(transport.pushes[0].records[0], {
+        entityType: "note",
+        entityId: note.noteId,
+        dirtyType: "delete",
+        clientUpdatedAt: "2026-06-24T02:00:00.000Z",
+        metadata: {
+          archivedAt: "2026-06-24T02:00:00.000Z",
+          key: note.key,
+          previousRelativePath: note.relativePath,
+          title: note.title,
+        },
+      })
+      assert.equal(transport.pushes[0].noteBodies, undefined)
+      assert.deepEqual(dirty.listDirtyRecords(), [])
+      assert.equal(readFileSync(path.join(rootPath, archived.relativePath), "utf8"), "Archive me remotely.\n")
+    })
+  })
+
+  test("remote pulls resolve matching local dirty notes before advancing and pushing", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Local Title",
+        body: "Local dirty content must be pushed.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-overwrite",
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+      dirty.markDirty({
+        entityType: "note",
+        entityId: note.noteId,
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { key: note.key, relativePath: note.relativePath, title: "Local Title" },
+      })
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Server body must not overwrite local dirty content.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 5,
+          hasMore: false,
+          changes: [{
+            sequence: 5,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Server Title",
+            relativePath: note.relativePath,
+            bodyAvailable: true,
+            metadata: { key: note.key, relativePath: note.relativePath, title: "Server Title", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+        push: () => assert.fail("dirty conflict should be resolved by the pulled server change before push"),
+      })
+
+      const summary = createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
+
+      assert.deepEqual(transport.calls, ["pull", `download:${note.noteId}`])
+      assert.equal(transport.pushes.length, 0)
+      assert.deepEqual(summary, { status: "synced", pushed: 0, pulled: 1 })
+      assert.deepEqual(dirty.listDirtyRecords(), [])
+      const updated = core.notes.get(note.key)
+      assert.equal(updated.title, "Server Title")
+      assert.equal(updated.body, "Server body must not overwrite local dirty content.\n")
+      assert.equal(readFileSync(note.notePath, "utf8"), "Server body must not overwrite local dirty content.\n")
+      assert.deepEqual(listRecoveryOrConflictFiles(rootPath), [])
+    })
+  })
+
+
+  test("pulled folder deletes reject the managed note root", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "folder",
+            entityId: "note",
+            changeType: "folder-delete",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            relativePath: "note",
+            bodyAvailable: false,
+            metadata: { relativePath: "note", deletedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /managed note root folder/,
+      )
+      assert.equal(existsSync(path.join(rootPath, "note")), true)
+      assert.deepEqual(createFolderRepository(rootPath, { role: "client", workspaceId }).listFolders(), [])
+    })
+  })
+
+
+  test("pulled note upserts reject normalized nested draft paths", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        bodies: { "nested-draft": "Nested draft body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 3,
+          hasMore: false,
+          changes: [{
+            sequence: 3,
+            entityType: "note",
+            entityId: "nested-draft",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Nested Draft",
+            relativePath: "note/../draft/nested/foo.md",
+            bodyAvailable: true,
+            metadata: { key: "foo", relativePath: "note/../draft/nested/foo.md", title: "Nested Draft", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /Invalid pulled note relativePath/,
+      )
+      assert.equal(existsSync(path.join(rootPath, "draft", "nested", "foo.md")), false)
+      assert.deepEqual(listRecoveryOrConflictFiles(rootPath), [])
+    })
+  })
+
+  test("pulled draft note upserts create local drafts", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        bodies: { "draft-remote": "Remote draft body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 3,
+          hasMore: false,
+          changes: [{
+            sequence: 3,
+            entityType: "note",
+            entityId: "draft-remote",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Remote Draft",
+            relativePath: "draft/remote-draft.md",
+            bodyAvailable: true,
+            metadata: {
+              key: "remote-draft",
+              relativePath: "draft/remote-draft.md",
+              description: "Generated remote draft description.",
+              title: "Remote Draft",
+              createdAt: "2026-06-24T01:00:00.000Z",
+              updatedAt: "2026-06-24T01:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.equal(readFileSync(path.join(rootPath, "draft", "remote-draft.md"), "utf8"), "Remote draft body.\n")
+      assert.deepEqual(createSidecarRepository(rootPath).readByNoteId("draft-remote"), {
+        type: "draft",
+        noteId: "draft-remote",
+        key: "remote-draft",
+        title: "Remote Draft",
+        description: "Generated remote draft description.",
+        relativePath: "draft/remote-draft.md",
+        createdAt: "2026-06-24T01:00:00.000Z",
+        updatedAt: "2026-06-24T01:00:00.000Z",
+        archivedAt: null,
+        namingVersion: 1,
+      })
+    })
+  })
+
+  test("failed first-time pulled note sidecar metadata rolls back the created note", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        bodies: { "note-bad-ai": "Remote bad AI body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 7,
+          hasMore: false,
+          changes: [{
+            sequence: 7,
+            entityType: "note",
+            entityId: "note-bad-ai",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Bad AI",
+            relativePath: "note/bad-ai.md",
+            bodyAvailable: true,
+            metadata: {
+              key: "bad-ai",
+              relativePath: "note/bad-ai.md",
+              title: "Bad AI",
+              createdAt: "2026-06-24T01:00:00.000Z",
+              updatedAt: "2026-06-24T01:00:00.000Z",
+              ai: { description: { lastProcessedAt: 42 } },
+            },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /lastProcessedAt/i,
+      )
+      assert.equal(existsSync(path.join(rootPath, "note", "bad-ai.md")), false)
+      assert.equal(existsSync(path.join(rootPath, ".data", "notes", "note-bad-ai.json")), false)
+    })
+  })
+
+  test("pulled promoted drafts update local sidecar type", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const core = createBlueNoteCore({ rootPath })
+      core.notes.create({
+        type: "draft",
+        title: "Promoted Draft",
+        body: "Local draft body.\n",
+        noteIdGenerator: () => "note-promoted-client",
+        randomSource: () => 46655,
+        enqueueAi: false,
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+      const transport = makeTransport({
+        bodies: { "note-promoted-client": "Promoted server body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 8,
+          hasMore: false,
+          changes: [{
+            sequence: 8,
+            entityType: "note",
+            entityId: "note-promoted-client",
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T02:00:00.000Z",
+            title: "Promoted Draft",
+            relativePath: "note/promoted-draft.md",
+            bodyAvailable: true,
+            metadata: {
+              key: "promoted-draft",
+              relativePath: "note/promoted-draft.md",
+              title: "Promoted Draft",
+              createdAt: "2026-06-24T01:00:00.000Z",
+              updatedAt: "2026-06-24T02:00:00.000Z",
+            },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      const sidecar = createSidecarRepository(rootPath).readByNoteId("note-promoted-client")
+      assert.equal(sidecar.type, "normal")
+      assert.equal(sidecar.relativePath, "note/promoted-draft.md")
+      assert.equal(existsSync(path.join(rootPath, "draft", "promoted-draft-000zzz.md")), false)
+      assert.equal(readFileSync(path.join(rootPath, "note", "promoted-draft.md"), "utf8"), "Promoted server body.\n")
+    })
+  })
+
+  test("sync cycle normalizes dirty folder records to protocol folder dirty types", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      dirty.markDirty({
+        entityType: "folder",
+        entityId: "note/projects",
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/projects" },
+      })
+      const transport = makeTransport()
+
+      createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow()
+
+      assert.equal(transport.pushes.length, 1)
+      assert.deepEqual(transport.pushes[0].records, [{
+        entityType: "folder",
+        entityId: "note/projects",
+        dirtyType: "folder-upsert",
+        clientUpdatedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/projects" },
+      }])
+    })
+  })
+
+  test("pulled folder upserts create local empty folders and folder records", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 7,
+          hasMore: false,
+          changes: [{
+            sequence: 7,
+            entityType: "folder",
+            entityId: "note/projects/empty",
+            changeType: "folder-upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            relativePath: "note/projects/empty",
+            bodyAvailable: false,
+            metadata: { relativePath: "note/projects/empty" },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "empty")), true)
+      assert.deepEqual(createFolderRepository(rootPath, { role: "client", workspaceId }).listFolders(), [
+        {
+          relativePath: "note/projects/empty",
+          createdAt: "2026-06-24T01:00:00.000Z",
+          updatedAt: "2026-06-24T01:00:00.000Z",
+          deletedAt: null,
+        },
+      ])
+    })
+  })
+
+  test("pulled folder deletes remove existing local empty folders", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects", "empty"), { recursive: true })
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 8,
+          hasMore: false,
+          changes: [{
+            sequence: 8,
+            entityType: "folder",
+            entityId: "note/projects/empty",
+            changeType: "folder-delete",
+            serverRevision: 2,
+            changedAt: "2026-06-24T02:00:00.000Z",
+            relativePath: "note/projects/empty",
+            bodyAvailable: false,
+            metadata: { relativePath: "note/projects/empty", deletedAt: "2026-06-24T02:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "empty")), false)
+      assert.deepEqual(createFolderRepository(rootPath, { role: "client", workspaceId }).listFolders(), [
+        {
+          relativePath: "note/projects/empty",
+          createdAt: "2026-06-24T02:00:00.000Z",
+          updatedAt: "2026-06-24T02:00:00.000Z",
+          deletedAt: "2026-06-24T02:00:00.000Z",
+        },
+      ])
+    })
+  })
+
+  test("pulled folder paths must remain under note after normalization", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 9,
+          hasMore: false,
+          changes: [{
+            sequence: 9,
+            entityType: "folder",
+            entityId: "note/../draft/escaped",
+            changeType: "folder-upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            relativePath: "note/../draft/escaped",
+            bodyAvailable: false,
+            metadata: { relativePath: "note/../draft/escaped" },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /folder relativePath/i,
+      )
+      assert.equal(existsSync(path.join(rootPath, "draft", "escaped")), false)
+    })
+  })
+
+
+  test("initial pull pagination stops when a hasMore response does not advance the cursor", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const pullSinceSequences: number[] = []
+      const transport = makeTransport({
+        pull: (request) => {
+          pullSinceSequences.push(request.sinceSequence)
+          return {
+            workspaceId: request.workspaceId,
+            fromSequence: request.sinceSequence,
+            toSequence: request.sinceSequence,
+            hasMore: true,
+            changes: [],
+          }
+        },
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 0 })
+      assert.deepEqual(pullSinceSequences, [0])
+    })
+  })
+
+  test("push response does not mark unseen server changes as pulled", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      dirty.markDirty({
+        entityType: "folder",
+        entityId: "note/projects",
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/projects" },
+      })
+      const pullSinceSequences: number[] = []
+      const transport = makeTransport({
+        pull(request) {
+          pullSinceSequences.push(request.sinceSequence)
+          return { workspaceId: request.workspaceId, fromSequence: request.sinceSequence, toSequence: 5, hasMore: false, changes: [] }
+        },
+        push(request) {
+          return {
+            accepted: request.records.map((record) => ({ entityType: record.entityType, entityId: record.entityId, serverRevision: 1 })),
+            replacedByServer: [],
+            rejected: [],
+            serverSequence: 6,
+          }
+        },
+      })
+      const service = createSyncClientService({ rootPath, workspaceId, replicaId, transport })
+
+      assert.deepEqual(service.syncNow(), { status: "synced", pushed: 1, pulled: 0 })
+      assert.deepEqual(service.syncNow(), { status: "synced", pushed: 0, pulled: 0 })
+      assert.deepEqual(pullSinceSequences, [0, 5, 5])
+    })
+  })
+
+  test("pulled note upsert without an available body does not wipe local content", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Keep Body",
+        body: "Do not erase this.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-keep-body",
+      })
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      for (const record of dirty.listDirtyRecords()) {
+        dirty.clearDirtyRecord(record.entityType, record.entityId)
+      }
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 6,
+          hasMore: false,
+          changes: [{
+            sequence: 6,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: note.title,
+            relativePath: note.relativePath,
+            bodyAvailable: false,
+            metadata: { key: note.key, relativePath: note.relativePath, title: note.title, updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /body/i)
+      assert.equal(core.notes.get(note.key).body, "Do not erase this.\n")
+      assert.equal(dirty.listDirtyRecords().some((record) => record.entityId === note.noteId), false)
+      assert.deepEqual(transport.calls, ["pull"])
+    })
+  })
+
+  test("pulled new note creates missing destination folders", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const core = createBlueNoteCore({ rootPath })
+      const transport = makeTransport({
+        bodies: { "note-server-new": "Hydrated from server.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 7,
+          hasMore: false,
+          changes: [{
+            sequence: 7,
+            entityType: "note",
+            entityId: "note-server-new",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Server New",
+            relativePath: "note/projects/server-new.md",
+            bodyAvailable: true,
+            metadata: { key: "server-new", relativePath: "note/projects/server-new.md", title: "Server New", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.equal(core.notes.get("server-new").body, "Hydrated from server.\n")
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "server-new.md")), true)
+    })
+  })
+
+  test("pulled relocation rejects paths owned by another local note", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const first = core.notes.create({ type: "normal", title: "First", body: "First body.\n", destinationFolder: "note/projects", enqueueAi: false, noteIdGenerator: () => "note-first" })
+      const second = core.notes.create({ type: "normal", title: "Second", body: "Second body.\n", destinationFolder: "note/projects", enqueueAi: false, noteIdGenerator: () => "note-second" })
+      const transport = makeTransport({
+        bodies: { [first.noteId]: "Server relocated first.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 8,
+          hasMore: false,
+          changes: [{
+            sequence: 8,
+            entityType: "note",
+            entityId: first.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: second.title,
+            relativePath: second.relativePath,
+            bodyAvailable: true,
+            metadata: { key: second.key, relativePath: second.relativePath, title: second.title, updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /already exists|owned/i)
+      assert.equal(core.notes.get(first.key).body, "First body.\n")
+      assert.equal(core.notes.get(second.key).body, "Second body.\n")
+    })
+  })
+
+  test("pulled folder changes clear matching local dirty folder records before push", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const dirty = createDirtyRecordRepository(rootPath, { role: "client", workspaceId })
+      dirty.markDirty({
+        entityType: "folder",
+        entityId: "note/projects",
+        dirtyType: "upsert",
+        markedAt: "2026-06-24T00:00:00.000Z",
+        metadata: { relativePath: "note/projects" },
+      })
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 9,
+          hasMore: false,
+          changes: [{
+            sequence: 9,
+            entityType: "folder",
+            entityId: "note/projects",
+            changeType: "folder-upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            metadata: { relativePath: "note/projects" },
+          }],
+        }),
+        push: () => assert.fail("dirty folder conflict should be resolved by the pulled server change before push"),
+      })
+
+      assert.deepEqual(createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), { status: "synced", pushed: 0, pulled: 1 })
+      assert.equal(dirty.listDirtyRecords().length, 0)
+      assert.equal(transport.pushes.length, 0)
+      assert.equal(existsSync(path.join(rootPath, "note", "projects")), true)
+    })
+  })
+
+  test("pulled note metadata key must match the relative path basename", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const transport = makeTransport({
+        bodies: { "note-key-mismatch": "Mismatch.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 10,
+          hasMore: false,
+          changes: [{
+            sequence: 10,
+            entityType: "note",
+            entityId: "note-key-mismatch",
+            changeType: "upsert",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Mismatch",
+            relativePath: "note/projects/server-key.md",
+            bodyAvailable: true,
+            metadata: { key: "different-key", relativePath: "note/projects/server-key.md", title: "Mismatch", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /key.*relativePath|relativePath.*key/i)
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "server-key.md")), false)
+      assert.equal(existsSync(path.join(rootPath, "note", "projects", "different-key.md")), false)
+    })
+  })
+
+  test("pulled note relative paths are validated after normalization before writing", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Victim",
+        body: "Victim body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-victim",
+      })
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Escaped body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 11,
+          hasMore: false,
+          changes: [{
+            sequence: 11,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Escape",
+            relativePath: "note/../escape.md",
+            bodyAvailable: true,
+            metadata: { key: "escape", relativePath: "note/../escape.md", title: "Escape", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /relativePath|note\//i)
+      assert.equal(existsSync(path.join(rootPath, "escape.md")), false)
+      assert.equal(readFileSync(note.notePath, "utf8").includes("Victim body."), true)
+      assert.equal(core.notes.get(note.key).body, "Victim body.\n")
+    })
+  })
+
+  test("pulled relocation rolls back files when sidecar validation fails", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Rollback Source",
+        body: "Original body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-rollback-source",
+      })
+      const destination = "note/projects/rollback-target.md"
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Relocated body.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 12,
+          hasMore: false,
+          changes: [{
+            sequence: 12,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Rollback Target",
+            relativePath: destination,
+            bodyAvailable: true,
+            metadata: { key: "rollback-target", relativePath: destination, title: "Rollback Target", updatedAt: "not-a-date" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /Invalid sidecar|updatedAt/i)
+      assert.equal(readFileSync(note.notePath, "utf8").includes("Original body."), true)
+      assert.equal(existsSync(path.join(rootPath, destination)), false)
+      assert.equal(core.notes.get(note.key).body, "Original body.\n")
+    })
+  })
+
+  test("pulled same-path AI validation failure rolls back edited note and sidecar", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Same Path Rollback",
+        body: "Original same-path body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-same-path-rollback",
+      })
+      const sidecars = createSidecarRepository(rootPath)
+      const originalSidecar = sidecars.readByNoteId(note.noteId)
+      const originalMarkdown = readFileSync(note.notePath, "utf8")
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Mutated body must roll back.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 15,
+          hasMore: false,
+          changes: [{
+            sequence: 15,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Mutated Title",
+            relativePath: note.relativePath,
+            bodyAvailable: true,
+            metadata: {
+              key: note.key,
+              relativePath: note.relativePath,
+              title: "Mutated Title",
+              updatedAt: "2026-06-24T01:00:00.000Z",
+              ai: { description: { lastProcessedAt: 123 } },
+            },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /Invalid sidecar|lastProcessedAt/i)
+      assert.equal(readFileSync(note.notePath, "utf8"), originalMarkdown)
+      assert.deepEqual(sidecars.readByNoteId(note.noteId), originalSidecar)
+      assert.equal(core.notes.get(note.key).body, "Original same-path body.\n")
+      assert.equal(core.notes.get(note.key).title, "Same Path Rollback")
+    })
+  })
+
+  test("pulled relocation rejects symlinked destination parents before writing", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note", "projects"), { recursive: true })
+      const outsidePath = path.join(rootPath, "outside")
+      mkdirSync(outsidePath, { recursive: true })
+      symlinkSync(outsidePath, path.join(rootPath, "note", "link"), "dir")
+      const core = createBlueNoteCore({ rootPath })
+      const note = core.notes.create({
+        type: "normal",
+        title: "Symlink Source",
+        body: "Safe local body.\n",
+        destinationFolder: "note/projects",
+        enqueueAi: false,
+        noteIdGenerator: () => "note-symlink-source",
+      })
+      const destination = "note/link/escaped.md"
+      const transport = makeTransport({
+        bodies: { [note.noteId]: "Escaped through symlink.\n" },
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 13,
+          hasMore: false,
+          changes: [{
+            sequence: 13,
+            entityType: "note",
+            entityId: note.noteId,
+            changeType: "upsert",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            title: "Escaped",
+            relativePath: destination,
+            bodyAvailable: true,
+            metadata: { key: "escaped", relativePath: destination, title: "Escaped", updatedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /symlink/i)
+      assert.equal(existsSync(path.join(outsidePath, "escaped.md")), false)
+      assert.equal(readFileSync(note.notePath, "utf8").includes("Safe local body."), true)
+      assert.equal(core.notes.get(note.key).body, "Safe local body.\n")
+    })
+  })
+
+  test("pulled delete rejects symlinked note parents before deleting", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      mkdirSync(path.join(rootPath, "note"), { recursive: true })
+      const outsidePath = path.join(rootPath, "outside")
+      mkdirSync(outsidePath, { recursive: true })
+      writeFileSync(path.join(outsidePath, "victim.md"), "Outside content must remain.\n", "utf8")
+      symlinkSync(outsidePath, path.join(rootPath, "note", "link"), "dir")
+      const sidecars = createSidecarRepository(rootPath)
+      sidecars.write({
+        noteId: "note-delete-symlink",
+        key: "victim",
+        title: "Victim",
+        description: "Outside content must remain.",
+        relativePath: "note/link/victim.md",
+        createdAt: "2026-06-24T00:00:00.000Z",
+        updatedAt: "2026-06-24T00:00:00.000Z",
+        archivedAt: null,
+        namingVersion: 1,
+        type: "normal",
+      })
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 14,
+          hasMore: false,
+          changes: [{
+            sequence: 14,
+            entityType: "note",
+            entityId: "note-delete-symlink",
+            changeType: "delete",
+            serverRevision: 2,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            metadata: { relativePath: "note/link/victim.md" },
+          }],
+        }),
+      })
+
+      assert.throws(() => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(), /symlink/i)
+      assert.equal(readFileSync(path.join(outsidePath, "victim.md"), "utf8"), "Outside content must remain.\n")
+      assert.equal(existsSync(sidecars.getSidecarPathByNoteId("note-delete-symlink")), true)
+    })
+  })
+
+  test("createBlueNoteCore sync.now uses a configured abstract transport", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport()
+      const core = createBlueNoteCore({ rootPath, syncTransport: transport, syncReplicaId: replicaId })
+
+      assert.deepEqual(core.sync.now(), { status: "synced", pushed: 0, pulled: 0 })
+      assert.deepEqual(transport.calls, ["pull"])
+    })
+  })
+})

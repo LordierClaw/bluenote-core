@@ -4,6 +4,7 @@ import { enqueueDescribeNoteIfAiEnabled } from "./enqueue-describe-note.js";
 import { createNoteDescription } from "../domain/note-description.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
+import { readSyncRuntimeMode } from "../sync/runtime-mode.js";
 function isDescriptionStale(updatedAt, lastProcessedAt) {
     const updatedAtTime = Date.parse(updatedAt);
     const lastProcessedAtTime = Date.parse(lastProcessedAt ?? "");
@@ -13,7 +14,21 @@ function formatStaleScanWarning(key, error) {
     const message = error instanceof Error ? error.message : String(error);
     return `Warning: could not scan note '${key}' for AI description refresh: ${message}`;
 }
+function readOptionalSidecarByKey(sidecars, key) {
+    if (existsSync(sidecars.getSidecarPath(key))) {
+        return sidecars.read(key);
+    }
+    try {
+        return sidecars.read(key);
+    }
+    catch {
+        return null;
+    }
+}
 export function scanAndEnqueueStaleDescriptions(rootPath, options) {
+    if (readSyncRuntimeMode(rootPath).mode === "sync-client") {
+        return { scanned: 0, enqueued: 0 };
+    }
     const configRepository = createAiConfigRepository(rootPath);
     if (!configRepository.exists()) {
         return { scanned: 0, enqueued: 0 };
@@ -34,8 +49,7 @@ export function scanAndEnqueueStaleDescriptions(rootPath, options) {
             if (note.frontmatter.archivedAt !== undefined) {
                 continue;
             }
-            const sidecarPath = sidecars.getSidecarPath(key);
-            const sidecar = existsSync(sidecarPath) ? sidecars.read(key) : null;
+            const sidecar = readOptionalSidecarByKey(sidecars, key);
             const lastProcessedAt = sidecar?.ai?.description?.lastProcessedAt;
             if (!isDescriptionStale(note.frontmatter.updatedAt, lastProcessedAt)) {
                 continue;

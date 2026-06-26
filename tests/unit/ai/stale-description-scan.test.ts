@@ -13,6 +13,7 @@ import { ensureManagedRoot, getAiQueuePath, getInboxNotePath } from "../../../sr
 import { createNoteRepository } from "../../../src/storage/note-repository"
 import { createSidecarRepository } from "../../../src/storage/sidecar-repository"
 import type { Clock } from "../../../src/platform/clock"
+import { setSyncRuntimeMode } from "../../../src/sync/runtime-mode"
 
 async function withRoot(name: string, callback: (rootPath: string) => Promise<void>): Promise<void> {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), name))
@@ -50,6 +51,7 @@ function validAiConfig(enabled = true) {
 
 function createStoredNote(rootPath: string, input: {
   key: string
+  noteId?: string
   title: string
   body?: string
   updatedAt: string
@@ -59,6 +61,7 @@ function createStoredNote(rootPath: string, input: {
   const repository = createNoteRepository(rootPath)
   const createdAt = "2026-06-01T00:00:00.000Z"
   const record = repository.create({
+    noteId: input.noteId,
     frontmatter: {
       id: input.key,
       schemaVersion: 1,
@@ -77,7 +80,7 @@ function createStoredNote(rootPath: string, input: {
 
   if (input.lastProcessedAt) {
     const sidecars = createSidecarRepository(rootPath)
-    const sidecar = sidecars.read(input.key)
+    const sidecar = input.noteId === undefined ? sidecars.read(input.key) : sidecars.readByNoteId(input.noteId)
     sidecars.write({
       ...sidecar,
       ai: {
@@ -146,6 +149,27 @@ test("note with no AI description lastProcessedAt enqueues one describe-note job
     assert.equal(queue.jobs[0]?.kind, "describe-note")
     assert.equal(queue.jobs[0]?.key, "project-notes")
     assert.equal(queue.jobs[0]?.relativePath, "note/project-notes.md")
+  })
+})
+
+
+test("sync-client mode disables stale AI description scans", async () => {
+  await withRoot("bluenote-stale-scan-sync-client-", async (rootPath) => {
+    setSyncRuntimeMode(rootPath, { mode: "sync-client", workspaceId: "workspace-ai-sync-client" })
+    createAiConfigRepository(rootPath).write(validAiConfig(true))
+    createStoredNote(rootPath, {
+      key: "server-authoritative-ai",
+      title: "Server authoritative AI",
+      body: "Local stale scan must not enqueue this note.\n",
+      updatedAt: "2026-06-01T10:00:00.000Z",
+    })
+
+    const result = scanAndEnqueueStaleDescriptions(rootPath, {
+      clock: fixedClock("2026-06-01T11:00:00.000Z"),
+    })
+
+    assert.deepEqual(result, { scanned: 0, enqueued: 0 })
+    assert.equal(existsSync(getAiQueuePath(rootPath)), false)
   })
 })
 
@@ -251,6 +275,26 @@ test("notes processed at or after updatedAt are not enqueued", async () => {
     })
 
     assert.deepEqual(result, { scanned: 2, enqueued: 0 })
+    assert.equal(existsSync(getAiQueuePath(rootPath)), false)
+  })
+})
+
+test("notes processed at or after updatedAt are not enqueued when sidecars are noteId-keyed", async () => {
+  await withRoot("bluenote-stale-scan-fresh-noteid-sidecar-", async (rootPath) => {
+    createAiConfigRepository(rootPath).write(validAiConfig(true))
+    createStoredNote(rootPath, {
+      key: "schema-three-note",
+      noteId: "note_schema_three_fresh",
+      title: "Schema Three Note",
+      updatedAt: "2026-06-01T10:00:00.000Z",
+      lastProcessedAt: "2026-06-01T10:01:00.000Z",
+    })
+
+    const result = scanAndEnqueueStaleDescriptions(rootPath, {
+      clock: fixedClock("2026-06-01T11:00:00.000Z"),
+    })
+
+    assert.deepEqual(result, { scanned: 1, enqueued: 0 })
     assert.equal(existsSync(getAiQueuePath(rootPath)), false)
   })
 })

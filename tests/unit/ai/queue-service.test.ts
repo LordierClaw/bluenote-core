@@ -353,6 +353,35 @@ test("deleted-note cleanup is narrow and keeps existing-note describe jobs retry
   })
 })
 
+
+test("existing-note describe jobs without sidecars are removed instead of retried", async () => {
+  await withRoot("bluenote-ai-queue-drop-missing-sidecar-", async (rootPath) => {
+    await mkdir(path.join(rootPath, "note"), { recursive: true })
+    await writeFile(path.join(rootPath, "note", "sidecarless-queue.md"), `---
+id: sidecarless-queue
+schemaVersion: 1
+title: Sidecarless Queue
+mode: plain
+tags: []
+createdAt: 2026-06-01T00:00:00.000Z
+updatedAt: 2026-06-01T00:00:00.000Z
+---
+Legacy queue body.
+`, "utf8")
+    const job = enqueueDescribeNoteJob(rootPath, {
+      key: "sidecarless-queue",
+      relativePath: "note/sidecarless-queue.md",
+      title: "Sidecarless Queue",
+      body: "Legacy queue body.\n",
+      currentDescription: null,
+      promptHash: baseDescribeInput.promptHash,
+    })
+
+    assert.equal(dropDescribeNoteJobIfNoteMissing(rootPath, job), true)
+    assert.deepEqual(createAiQueueRepository(rootPath).read().jobs, [])
+  })
+})
+
 test("malformed queue JSON raises a helpful error and is not overwritten", async () => {
   await withRoot("bluenote-ai-queue-malformed-", async (rootPath) => {
     const malformedJson = "{ malformed json"

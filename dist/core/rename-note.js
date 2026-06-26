@@ -5,7 +5,10 @@ import { createNoteKey } from "../domain/note-key.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { selectNote } from "./select-note.js";
 import { joinPortableRelativePath } from "../platform/path-safety.js";
+import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
 import { UsageError } from "./errors.js";
+import { createSidecarRepository } from "../storage/sidecar-repository.js";
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot.js";
 function buildRecoveryArtifactPath(rootPath, previousKey, nextKey) {
     const safePreviousKey = previousKey.replace(/[^a-z0-9-]+/gi, "-");
     const safeNextKey = nextKey.replace(/[^a-z0-9-]+/gi, "-");
@@ -28,6 +31,7 @@ export function renameNote(options) {
     const repository = createNoteRepository(rootPath);
     const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility });
     const currentKey = selected.frontmatter.id;
+    const syncEntityId = getNoteSyncEntityId(rootPath, selected);
     let nextKey;
     try {
         nextKey = createNoteKey(options.title, {
@@ -43,11 +47,17 @@ export function renameNote(options) {
         });
     }
     const recoveryArtifactPath = buildRecoveryArtifactPath(rootPath, currentKey, nextKey);
+    const nextRelativePath = joinPortableRelativePath(path.posix.dirname(selected.sourcePath), `${nextKey}.md`);
+    const snapshots = snapshotFiles([
+        path.join(rootPath, selected.sourcePath),
+        path.join(rootPath, nextRelativePath),
+        createSidecarRepository(rootPath).getSidecarPathByNoteId(syncEntityId),
+    ]);
     const recoveryArtifact = {
         previousKey: currentKey,
         nextKey,
         previousRelativePath: selected.sourcePath,
-        nextRelativePath: joinPortableRelativePath(path.posix.dirname(selected.sourcePath), `${nextKey}.md`),
+        nextRelativePath,
         stagedAt: options.updatedAt,
     };
     try {
@@ -67,6 +77,25 @@ export function renameNote(options) {
             // Best-effort cleanup: a stale recovery artifact is safer than reporting a successful rename as failed.
         }
         updateLatestOpenedPathIfMatched(rootPath, renamed.previousRelativePath, renamed.relativePath);
+        try {
+            recordSyncMutationBestEffort(rootPath, {
+                notes: [{
+                        entityId: syncEntityId,
+                        markedAt: options.updatedAt,
+                        metadata: {
+                            key: renamed.key,
+                            previousKey: renamed.previousKey,
+                            previousRelativePath: renamed.previousRelativePath,
+                            relativePath: renamed.relativePath,
+                            title: options.title,
+                        },
+                    }],
+            });
+        }
+        catch (error) {
+            restoreFileSnapshots(snapshots);
+            throw error;
+        }
         return renamed;
     }
     catch (error) {

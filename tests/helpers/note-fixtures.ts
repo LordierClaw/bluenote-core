@@ -39,6 +39,7 @@ export const noteMarkdown = legacyNoteMarkdown
 
 export function sidecarJson(input: {
   type?: "normal" | "draft" | "archived"
+  noteId?: string
   key: string
   title: string
   description: string
@@ -60,6 +61,7 @@ export function sidecarJson(input: {
   return `${JSON.stringify(
     {
       type,
+      ...(input.noteId === undefined ? {} : { noteId: input.noteId }),
       key: input.key,
       title: input.title,
       description: input.description,
