@@ -1490,6 +1490,21 @@ test("server publishes queued AI sidecar updates as pullable note changes", asyn
       ["note", "note-ai-1", "upsert", 2],
     ])
 
+    const initialPull = server.getChanges({ workspaceId, sinceSequence: 0, limit: 10 })
+    assert.equal(initialPull.toSequence, 2)
+    assert.equal(initialPull.changes.length, 2)
+    assert.deepEqual(initialPull.changes.map((change) => ({ sequence: change.sequence, serverRevision: change.serverRevision, sourceReplicaId: change.sourceReplicaId, bodyAvailable: change.bodyAvailable })), [
+      { sequence: 1, serverRevision: 1, sourceReplicaId: "client-a", bodyAvailable: true },
+      { sequence: 2, serverRevision: 2, sourceReplicaId: "server-ai", bodyAvailable: false },
+    ])
+    assert.deepEqual(server.downloadNoteBody("note-ai-1", { workspaceId, sequence: 1, serverRevision: 1 }), {
+      workspaceId,
+      noteId: "note-ai-1",
+      sequence: 1,
+      serverRevision: 1,
+      body: "AI body.\n",
+    })
+
     const changes = server.getChanges({ workspaceId, sinceSequence: 1, limit: 10 })
     assert.equal(changes.toSequence, 2)
     assert.equal(changes.changes.length, 1)

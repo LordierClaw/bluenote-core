@@ -856,20 +856,52 @@ export function createSyncServerService(options) {
                     });
                 }
                 const rows = handle.db.exec(`
+            WITH latest_changes AS (
+              SELECT sequence, entityType, entityId, changeType, serverRevision, changedAt, title, relativePath, bodyAvailable, metadataJson, sourceReplicaId
+              FROM server_changes AS changes
+              WHERE workspaceId = ? AND sequence > ?
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM server_changes AS newer
+                  WHERE newer.workspaceId = changes.workspaceId
+                    AND newer.entityType = changes.entityType
+                    AND newer.entityId = changes.entityId
+                    AND newer.sequence > changes.sequence
+                )
+            ), body_upserts_behind_metadata_only AS (
+              SELECT body.sequence, body.entityType, body.entityId, body.changeType, body.serverRevision, body.changedAt, body.title, body.relativePath, body.bodyAvailable, body.metadataJson, body.sourceReplicaId
+              FROM server_changes AS body
+              JOIN latest_changes AS latest
+                ON latest.entityType = body.entityType
+               AND latest.entityId = body.entityId
+              WHERE body.workspaceId = ?
+                AND body.sequence > ?
+                AND body.entityType = 'note'
+                AND body.changeType = 'upsert'
+                AND body.bodyAvailable = 1
+                AND latest.entityType = 'note'
+                AND latest.changeType = 'upsert'
+                AND latest.bodyAvailable = 0
+                AND latest.sourceReplicaId = 'server-ai'
+                AND body.sequence = (
+                  SELECT MAX(candidate.sequence)
+                  FROM server_changes AS candidate
+                  WHERE candidate.workspaceId = body.workspaceId
+                    AND candidate.entityType = body.entityType
+                    AND candidate.entityId = body.entityId
+                    AND candidate.changeType = 'upsert'
+                    AND candidate.bodyAvailable = 1
+                    AND candidate.sequence < latest.sequence
+                )
+            )
             SELECT sequence, entityType, entityId, changeType, serverRevision, changedAt, title, relativePath, bodyAvailable, metadataJson, sourceReplicaId
-            FROM server_changes AS changes
-            WHERE workspaceId = ? AND sequence > ?
-              AND NOT EXISTS (
-                SELECT 1
-                FROM server_changes AS newer
-                WHERE newer.workspaceId = changes.workspaceId
-                  AND newer.entityType = changes.entityType
-                  AND newer.entityId = changes.entityId
-                  AND newer.sequence > changes.sequence
-              )
+            FROM latest_changes
+            UNION
+            SELECT sequence, entityType, entityId, changeType, serverRevision, changedAt, title, relativePath, bodyAvailable, metadataJson, sourceReplicaId
+            FROM body_upserts_behind_metadata_only
             ORDER BY sequence ASC
             LIMIT ?
-          `, [options.workspaceId, request.sinceSequence, request.limit + 1])[0]?.values ?? [];
+          `, [options.workspaceId, request.sinceSequence, options.workspaceId, request.sinceSequence, request.limit + 1])[0]?.values ?? [];
                 const hasMore = rows.length > request.limit;
                 const visibleRows = hasMore ? rows.slice(0, request.limit) : rows;
                 const changes = visibleRows.map(toChangeView);
@@ -894,7 +926,7 @@ export function createSyncServerService(options) {
             const metadataRows = withSyncDatabase(rootPath, dbIdentity, (handle) => handle.db.exec(`
           SELECT sequence, serverRevision, metadataJson
           FROM server_changes
-          WHERE workspaceId = ? AND entityType = 'note' AND entityId = ? AND changeType = 'upsert'
+          WHERE workspaceId = ? AND entityType = 'note' AND entityId = ? AND changeType = 'upsert' AND bodyAvailable = 1
           ORDER BY sequence DESC
           LIMIT 1
         `, [options.workspaceId, noteId])[0]?.values ?? []);
