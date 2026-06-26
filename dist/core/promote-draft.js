@@ -84,6 +84,22 @@ function findSidecarForNote(rootPath, sidecars, key, relativePath) {
     }
     return null;
 }
+function sidecarMetadataKeyExists(rootPath, sidecars, key) {
+    if (fs.existsSync(sidecars.getSidecarPath(key))) {
+        return true;
+    }
+    for (const sidecarKey of listSidecarKeys(rootPath)) {
+        try {
+            if (sidecars.read(sidecarKey).key === key) {
+                return true;
+            }
+        }
+        catch {
+            // Ignore malformed unrelated sidecars; selected draft sidecar corruption is validated separately.
+        }
+    }
+    return false;
+}
 function getSidecarPathForMetadata(sidecars, sidecar) {
     return sidecar.noteId === undefined ? sidecars.getSidecarPath(sidecar.key) : sidecars.getSidecarPathByNoteId(sidecar.noteId);
 }
@@ -126,8 +142,7 @@ export function promoteDraft(options) {
     }
     const nextRelativePath = joinPortableRelativePath(destination.relativePath, `${nextKey}.md`);
     const nextNotePath = assertPathInsideRoot(rootPath, path.join(rootPath, nextRelativePath));
-    const conflictingLegacySidecarPath = sidecars.getSidecarPath(nextKey);
-    if ((nextNotePath !== previousNotePath && fs.existsSync(nextNotePath)) || (nextKey !== previousKey && fs.existsSync(conflictingLegacySidecarPath))) {
+    if ((nextNotePath !== previousNotePath && fs.existsSync(nextNotePath)) || (nextKey !== previousKey && sidecarMetadataKeyExists(rootPath, sidecars, nextKey))) {
         throw new UsageError(`Could not promote draft '${previousRelativePath}'.`, {
             hint: "A note with the generated key already exists in the destination.",
         });

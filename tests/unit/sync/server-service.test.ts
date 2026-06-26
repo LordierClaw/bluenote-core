@@ -845,6 +845,42 @@ test("server rejects folder deletes for the managed note root", async () => {
 })
 
 
+
+test("server rejects pushed folder paths with hidden segments", async () => {
+  await withRoot((rootPath) => {
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      records: [{
+        entityType: "folder",
+        entityId: "note/.private",
+        dirtyType: "folder-upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: { relativePath: "note/.private" },
+      }, {
+        entityType: "folder",
+        entityId: "note/project/.tmp",
+        dirtyType: "folder-upsert",
+        clientUpdatedAt: "2026-01-01T00:01:00.000Z",
+        metadata: { relativePath: "note/project/.tmp" },
+      }],
+    })
+
+    assert.deepEqual(response.accepted, [])
+    assert.equal(response.rejected.length, 2)
+    assert.match(response.rejected[0].message, /Invalid sync folder relativePath/)
+    assert.match(response.rejected[1].message, /Invalid sync folder relativePath/)
+    assert.equal(existsSync(path.join(rootPath, "note", ".private")), false)
+    assert.equal(existsSync(path.join(rootPath, "note", "project", ".tmp")), false)
+    assert.equal(readServerChanges(rootPath).length, 0)
+    assert.deepEqual(createFolderRepository(rootPath, dbIdentity).listFolders(), [])
+  })
+})
+
+
 test("server rolls back folder filesystem changes when folder DB write fails", async () => {
   await withRoot((rootPath) => {
     withSyncDatabase(rootPath, dbIdentity, (handle) => {

@@ -76,10 +76,21 @@ function normalizeFolderRelativePath(relativePath, rootPath) {
             hint: "Folder sync pushes must target directories, not Markdown note files.",
         });
     }
+    if (relativePathHasHiddenSegment(portableRelativePath)) {
+        throw new UsageError(`Invalid sync folder relativePath '${relativePath}'.`, {
+            hint: "Folder sync pushes must not target hidden path segments.",
+        });
+    }
     const absolutePath = assertPathInsideRoot(rootPath, path.join(rootPath, portableRelativePath));
     const normalNotesPath = getNormalNotesPath(rootPath);
     assertPathInsideRoot(normalNotesPath, absolutePath);
-    return toRootRelativePath(rootPath, absolutePath);
+    const normalizedRelativePath = toRootRelativePath(rootPath, absolutePath);
+    if (relativePathHasHiddenSegment(normalizedRelativePath)) {
+        throw new UsageError(`Invalid sync folder relativePath '${relativePath}'.`, {
+            hint: "Folder sync pushes must not target hidden path segments.",
+        });
+    }
+    return normalizedRelativePath;
 }
 function metadataWithoutBody(metadata) {
     const clean = {};

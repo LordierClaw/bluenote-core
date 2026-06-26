@@ -166,6 +166,52 @@ test("promoteDraft restores noteId-keyed sidecar when removing the draft fails",
   }
 })
 
+
+test("promoteDraft rejects keys reserved by noteId-keyed sidecar metadata", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-sidecar-key-collision-"))
+  const draftNoteId = "note_promote_collision_draft"
+
+  try {
+    await writeSidecarNote(rootPath, { noteId: draftNoteId, key: "draft-abc123", title: "Draft ABC", relativePath: "draft/draft-abc123.md", type: "draft" })
+    await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
+    await writeFile(path.join(rootPath, ".data", "notes", "note_existing_normal.json"), JSON.stringify({
+      type: "normal",
+      noteId: "note_existing_normal",
+      key: "promoted-draft-000000",
+      title: "Existing Normal",
+      description: "reserved key only in metadata",
+      relativePath: "note/elsewhere/existing.md",
+      createdAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2026-06-02T00:00:00.000Z",
+      archivedAt: null,
+      namingVersion: 1,
+    }, null, 2) + "\n", "utf8")
+
+    assert.throws(
+      () => promoteDraft({
+        override: rootPath,
+        selector: "draft-abc123",
+        destinationFolder: "note/work",
+        title: "Promoted Draft",
+        updatedAt: "2026-06-07T00:00:00.000Z",
+        randomSource: () => 0,
+      }),
+      (error) => {
+        assert.ok(error instanceof UsageError)
+        assert.match(error.message, /Could not promote draft/)
+        return true
+      },
+    )
+
+    assert.equal(await readFile(path.join(rootPath, "draft", "draft-abc123.md"), "utf8"), "Draft ABC body\n")
+    await assert.rejects(readFile(path.join(rootPath, "note", "work", "promoted-draft-000000.md"), "utf8"))
+    assert.equal(createSidecarRepository(rootPath).readByNoteId(draftNoteId).key, "draft-abc123")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+
 test("promoteDraft keeps local promotion when sync dirty tracking fails", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-sync-dirty-failure-"))
   const noteId = "note_promote_dirty_failure"
