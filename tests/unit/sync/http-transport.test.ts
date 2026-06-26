@@ -119,12 +119,15 @@ describe("sync HTTP transport", () => {
     assert.deepEqual(await transport.uploadNoteBody({ workspaceId: "workspace-a", replicaId: "replica-a", noteId: "note-a", contentHash: "sha256:abc", byteLength: 5, body: "Hello" }), { noteId: "note-a", contentHash: "sha256:abc", byteLength: 5, accepted: true })
     assert.deepEqual(await transport.downloadNoteBody("note-a", { workspaceId: "workspace-a" }), { workspaceId: "workspace-a", noteId: "note-a", contentHash: "sha256:def", byteLength: 6, body: "Server" })
     assert.deepEqual(await transport.status({ workspaceId: "workspace-a" }), { workspaceId: "workspace-a", ok: true })
+    const { getStatus } = transport
+    assert.deepEqual(await getStatus({ workspaceId: "workspace-a" }), { workspaceId: "workspace-a", ok: true })
 
     assert.deepEqual(calls.map((call) => [call.init.method, new URL(call.url).pathname]), [
       ["POST", "/base/sync/v1/changes/pull"],
       ["POST", "/base/sync/v1/changes/push"],
       ["POST", "/base/sync/v1/bodies/upload"],
       ["GET", "/base/sync/v1/bodies/note-a"],
+      ["GET", "/base/sync/v1/status"],
       ["GET", "/base/sync/v1/status"],
     ])
     for (const call of calls) {
@@ -135,6 +138,7 @@ describe("sync HTTP transport", () => {
     }
     assert.equal(new URL(calls[3].url).searchParams.get("workspaceId"), "workspace-a")
     assert.equal(new URL(calls[4].url).searchParams.get("workspaceId"), "workspace-a")
+    assert.equal(new URL(calls[5].url).searchParams.get("workspaceId"), "workspace-a")
   })
 
   test("server handlers route JSON requests without inlining bodies in change lists", async () => {

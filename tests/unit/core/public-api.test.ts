@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import {
   createBlueNoteCore,
   createDirtyRecordRepository,
+  createSyncClientService,
   createSyncLogWriter,
   createSyncServerService,
   ensureSyncDatabase,
@@ -133,6 +134,7 @@ describe("@lordierclaw/bluenote-core public API", () => {
     assert.equal(nowSummary.status, "not-linked")
     assert.equal(repairSummary.changed, false)
     assert.equal(typeof transport.pull, "function")
+    assert.equal(typeof createSyncClientService, "function")
     assert.equal(typeof createSyncServerService, "function")
     assert.equal(typeof ensureSyncDatabase, "function")
     assert.equal(typeof getSyncDatabasePath, "function")

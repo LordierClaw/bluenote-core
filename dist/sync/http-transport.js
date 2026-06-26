@@ -142,7 +142,7 @@ export function createSyncHttpTransport(options) {
             return requestJson(fetchImpl, baseUrl, endpointWithWorkspace("/sync/v1/status", options), { method: "GET" }, (value) => typeof value === "object" && value !== null && !Array.isArray(value), "status");
         },
         getStatus(options) {
-            return this.status(options);
+            return transport.status(options);
         },
     };
     return transport;

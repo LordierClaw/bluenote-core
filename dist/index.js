@@ -66,6 +66,7 @@ export * from "./storage/state-manifest.js";
 export * from "./sync/core-sync.js";
 export * from "./sync/types.js";
 export * from "./sync/protocol.js";
+export * from "./sync/client-service.js";
 export * from "./sync/server-service.js";
 export * from "./sync/http-transport.js";
 export * from "./sync/sync-log.js";
