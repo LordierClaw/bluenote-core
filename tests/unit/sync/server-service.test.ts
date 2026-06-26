@@ -880,6 +880,42 @@ test("server rolls back folder filesystem changes when folder DB write fails", a
 })
 
 
+test("server rolls back folder rows when server change logging fails", async () => {
+  await withRoot((rootPath) => {
+    withSyncDatabase(rootPath, dbIdentity, (handle) => {
+      handle.db.run(`
+        CREATE TRIGGER fail_server_change_insert
+        BEFORE INSERT ON server_changes
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated server change write failure');
+        END
+      `)
+    }, { save: true })
+    const server = createSyncServerService({ rootPath, workspaceId })
+
+    const response = server.acceptPush({
+      workspaceId,
+      replicaId: "client-a",
+      baseSequence: 0,
+      records: [{
+        entityType: "folder",
+        entityId: "note/log-failure",
+        dirtyType: "folder-upsert",
+        clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: { relativePath: "note/log-failure" },
+      }],
+    })
+
+    assert.deepEqual(response.accepted, [])
+    assert.equal(response.rejected.length, 1)
+    assert.match(response.rejected[0].message, /simulated server change write failure/)
+    assert.equal(existsSync(path.join(rootPath, "note", "log-failure")), false)
+    assert.deepEqual(createFolderRepository(rootPath, dbIdentity).listFolders(), [])
+    assert.equal(readServerChanges(rootPath).length, 0)
+  })
+})
+
+
 test("server accepts folder dirty records so client folder queues can drain", async () => {
   await withRoot((rootPath) => {
     mkdirSync(path.join(rootPath, "note", "old-projects"), { recursive: true })

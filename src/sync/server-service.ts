@@ -599,6 +599,10 @@ function applyFolderPush(
   const deletedAt = record.dirtyType === "folder-delete" ? record.clientUpdatedAt : null
   const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath))
   const existed = fs.existsSync(folderPath)
+  const previousFolderRows = handle.db.exec(
+    "SELECT relativePath, createdAt, updatedAt, deletedAt FROM folders WHERE relativePath = ?",
+    [relativePath],
+  )[0]?.values ?? []
   assertPathAndParentsAreNotSymlinks(rootPath, folderPath)
 
   const rollback = () => {
@@ -614,6 +618,17 @@ function applyFolderPush(
       } catch {
         // Best-effort rollback: preserve original sync error.
       }
+    }
+    try {
+      handle.db.run("DELETE FROM folders WHERE relativePath = ?", [relativePath])
+      for (const row of previousFolderRows) {
+        handle.db.run(
+          "INSERT INTO folders (relativePath, createdAt, updatedAt, deletedAt) VALUES (?, ?, ?, ?)",
+          row,
+        )
+      }
+    } catch {
+      // Best-effort rollback: preserve original sync error.
     }
   }
 

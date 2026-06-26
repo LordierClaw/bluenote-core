@@ -8,7 +8,6 @@ import type { ParsedNote } from "../storage/note-schema"
 import { serializePlainNote } from "../storage/plain-note"
 import type { NoteSidecar } from "../storage/sidecar-schema"
 import { createSidecarRepository } from "../storage/sidecar-repository"
-import { UsageError } from "../core/errors"
 import { createDirtyRecordRepository } from "./dirty-repository"
 import { createFolderRepository } from "./folder-repository"
 import { getSyncClientRuntimeMode } from "./runtime-mode"
@@ -206,9 +205,6 @@ export function recordSyncMutationBestEffort(rootPath: string, input: SyncMutati
       lastError: null,
     })
   } catch (error) {
-    throw new UsageError("Could not record sync dirty state for local mutation.", {
-      hint: "The local note change was written, but sync-client tracking failed. Repair .data/sync, then edit or mark the note dirty again before relying on sync.",
-      cause: error,
-    })
+    console.warn(error instanceof Error ? error.message : "Could not record sync dirty state for local mutation.")
   }
 }

@@ -203,7 +203,7 @@ test("moveNote marks the moved note and destination folder dirty in sync-client 
 })
 
 
-test("moveNote restores normalized destination when sync dirty tracking fails", async () => {
+test("moveNote keeps normalized local move when sync dirty tracking fails", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-move-note-sync-dirty-normalized-failure-"))
 
   try {
@@ -212,20 +212,18 @@ test("moveNote restores normalized destination when sync dirty tracking fails", 
     await mkdir(path.join(rootPath, "note", "projects"), { recursive: true })
     await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
 
-    assert.throws(
-      () => moveNote({
-        override: rootPath,
-        selector: "roadmap",
-        destinationFolder: String.raw`./note\projects/`,
-        updatedAt: "2026-06-07T11:00:00.000Z",
-      }),
-      /Could not record sync dirty state for local mutation/,
-    )
+    const moved = moveNote({
+      override: rootPath,
+      selector: "roadmap",
+      destinationFolder: String.raw`./note\projects/`,
+      updatedAt: "2026-06-07T11:00:00.000Z",
+    })
 
-    assert.equal(await readFile(path.join(rootPath, "note", "work", "roadmap.md"), "utf8"), "Roadmap body\n")
-    await assert.rejects(readFile(path.join(rootPath, "note", "projects", "roadmap.md"), "utf8"))
+    assert.equal(moved.relativePath, "note/projects/roadmap.md")
+    await assert.rejects(readFile(path.join(rootPath, "note", "work", "roadmap.md"), "utf8"))
+    assert.equal(await readFile(path.join(rootPath, "note", "projects", "roadmap.md"), "utf8"), "Roadmap body\n")
     const sidecar = JSON.parse(await readFile(path.join(rootPath, ".data", "notes", "note_move_normalized_failure.json"), "utf8"))
-    assert.equal(sidecar.relativePath, "note/work/roadmap.md")
+    assert.equal(sidecar.relativePath, "note/projects/roadmap.md")
     await rm(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true, force: true })
     assert.deepEqual(listDirtyRecords(rootPath), [])
   } finally {

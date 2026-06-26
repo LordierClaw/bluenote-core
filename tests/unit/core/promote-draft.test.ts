@@ -166,7 +166,7 @@ test("promoteDraft restores noteId-keyed sidecar when removing the draft fails",
   }
 })
 
-test("promoteDraft restores draft artifacts when sync dirty tracking fails", async () => {
+test("promoteDraft keeps local promotion when sync dirty tracking fails", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-sync-dirty-failure-"))
   const noteId = "note_promote_dirty_failure"
 
@@ -176,24 +176,22 @@ test("promoteDraft restores draft artifacts when sync dirty tracking fails", asy
     await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
     await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
 
-    assert.throws(
-      () => promoteDraft({
-        override: rootPath,
-        selector: "draft-abc123",
-        destinationFolder: "note/work",
-        title: "Promoted Draft",
-        updatedAt: "2026-06-07T00:00:00.000Z",
-        randomSource: () => 0,
-      }),
-      /Could not record sync dirty state for local mutation/,
-    )
+    const promoted = promoteDraft({
+      override: rootPath,
+      selector: "draft-abc123",
+      destinationFolder: "note/work",
+      title: "Promoted Draft",
+      updatedAt: "2026-06-07T00:00:00.000Z",
+      randomSource: () => 0,
+    })
 
-    assert.equal(await readFile(path.join(rootPath, "draft", "draft-abc123.md"), "utf8"), "Draft ABC body\n")
-    await assert.rejects(readFile(path.join(rootPath, "note", "work", "promoted-draft-000000.md"), "utf8"))
+    assert.equal(promoted.relativePath, "note/work/promoted-draft-000000.md")
+    await assert.rejects(readFile(path.join(rootPath, "draft", "draft-abc123.md"), "utf8"))
+    assert.equal(await readFile(path.join(rootPath, "note", "work", "promoted-draft-000000.md"), "utf8"), "Draft ABC body\n")
     const sidecar = JSON.parse(await readFile(path.join(rootPath, ".data", "notes", `${noteId}.json`), "utf8"))
-    assert.equal(sidecar.type, "draft")
-    assert.equal(sidecar.key, "draft-abc123")
-    assert.equal(sidecar.relativePath, "draft/draft-abc123.md")
+    assert.equal(sidecar.type, "normal")
+    assert.equal(sidecar.key, "promoted-draft-000000")
+    assert.equal(sidecar.relativePath, "note/work/promoted-draft-000000.md")
     await rm(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true, force: true })
     assert.deepEqual(listDirtyRecords(rootPath), [])
   } finally {
