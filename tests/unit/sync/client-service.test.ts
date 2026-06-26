@@ -500,6 +500,39 @@ describe("sync client service", () => {
   })
 
 
+  test("pulled folder deletes reject the managed note root", async () => {
+    await withRoot((rootPath) => {
+      enableClient(rootPath)
+      const transport = makeTransport({
+        pull: (request) => ({
+          workspaceId: request.workspaceId,
+          fromSequence: request.sinceSequence,
+          toSequence: 1,
+          hasMore: false,
+          changes: [{
+            sequence: 1,
+            entityType: "folder",
+            entityId: "note",
+            changeType: "folder-delete",
+            serverRevision: 1,
+            changedAt: "2026-06-24T01:00:00.000Z",
+            relativePath: "note",
+            bodyAvailable: false,
+            metadata: { relativePath: "note", deletedAt: "2026-06-24T01:00:00.000Z" },
+          }],
+        }),
+      })
+
+      assert.throws(
+        () => createSyncClientService({ rootPath, workspaceId, replicaId, transport }).syncNow(),
+        /managed note root folder/,
+      )
+      assert.equal(existsSync(path.join(rootPath, "note")), true)
+      assert.deepEqual(createFolderRepository(rootPath, { role: "client", workspaceId }).listFolders(), [])
+    })
+  })
+
+
   test("pulled note upserts reject normalized nested draft paths", async () => {
     await withRoot((rootPath) => {
       enableClient(rootPath)

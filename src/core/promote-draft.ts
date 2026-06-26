@@ -12,6 +12,7 @@ import type { NoteSidecar } from "../storage/sidecar-schema"
 import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
 import { selectNote } from "./select-note"
 import { UsageError } from "./errors"
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot"
 
 export interface PromoteDraftOptions extends ResolveBlueNoteRootOptions {
   selector: string
@@ -178,6 +179,13 @@ export function promoteDraft(options: PromoteDraftOptions): PromoteDraftSummary 
     archivedAt: null,
   }
   const nextSidecarPath = getSidecarPathForMetadata(sidecars, nextSidecar)
+  const snapshots = snapshotFiles([
+    previousNotePath,
+    nextNotePath,
+    previousSidecarPath,
+    nextSidecarPath,
+    path.join(rootPath, ".data", "latest-opened-note.json"),
+  ])
 
   let wroteNextNote = false
   let wroteNextSidecar = false
@@ -222,19 +230,24 @@ export function promoteDraft(options: PromoteDraftOptions): PromoteDraftSummary 
   }
 
   updateLatestOpenedPathIfMatched(rootPath, previousRelativePath, nextRelativePath)
-  recordSyncMutationBestEffort(rootPath, {
-    notes: [{
-      entityId: syncEntityId,
-      markedAt: nextSidecar.updatedAt,
-      metadata: {
-        key: nextKey,
-        previousKey,
-        previousRelativePath,
-        relativePath: nextRelativePath,
-        title,
-      },
-    }],
-    folders: [{ relativePath: destination.relativePath, markedAt: nextSidecar.updatedAt }],
-  })
+  try {
+    recordSyncMutationBestEffort(rootPath, {
+      notes: [{
+        entityId: syncEntityId,
+        markedAt: nextSidecar.updatedAt,
+        metadata: {
+          key: nextKey,
+          previousKey,
+          previousRelativePath,
+          relativePath: nextRelativePath,
+          title,
+        },
+      }],
+      folders: [{ relativePath: destination.relativePath, markedAt: nextSidecar.updatedAt }],
+    })
+  } catch (error) {
+    restoreFileSnapshots(snapshots)
+    throw error
+  }
   return { previousKey, key: nextKey, title, previousRelativePath, relativePath: nextRelativePath, notePath: nextNotePath }
 }

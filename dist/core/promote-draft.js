@@ -10,6 +10,7 @@ import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
 import { selectNote } from "./select-note.js";
 import { UsageError } from "./errors.js";
+import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot.js";
 function normalizeFolderRelativePath(relativePath) {
     return relativePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
@@ -143,6 +144,13 @@ export function promoteDraft(options) {
         archivedAt: null,
     };
     const nextSidecarPath = getSidecarPathForMetadata(sidecars, nextSidecar);
+    const snapshots = snapshotFiles([
+        previousNotePath,
+        nextNotePath,
+        previousSidecarPath,
+        nextSidecarPath,
+        path.join(rootPath, ".data", "latest-opened-note.json"),
+    ]);
     let wroteNextNote = false;
     let wroteNextSidecar = false;
     let removedPreviousNote = false;
@@ -202,20 +210,26 @@ export function promoteDraft(options) {
         });
     }
     updateLatestOpenedPathIfMatched(rootPath, previousRelativePath, nextRelativePath);
-    recordSyncMutationBestEffort(rootPath, {
-        notes: [{
-                entityId: syncEntityId,
-                markedAt: nextSidecar.updatedAt,
-                metadata: {
-                    key: nextKey,
-                    previousKey,
-                    previousRelativePath,
-                    relativePath: nextRelativePath,
-                    title,
-                },
-            }],
-        folders: [{ relativePath: destination.relativePath, markedAt: nextSidecar.updatedAt }],
-    });
+    try {
+        recordSyncMutationBestEffort(rootPath, {
+            notes: [{
+                    entityId: syncEntityId,
+                    markedAt: nextSidecar.updatedAt,
+                    metadata: {
+                        key: nextKey,
+                        previousKey,
+                        previousRelativePath,
+                        relativePath: nextRelativePath,
+                        title,
+                    },
+                }],
+            folders: [{ relativePath: destination.relativePath, markedAt: nextSidecar.updatedAt }],
+        });
+    }
+    catch (error) {
+        restoreFileSnapshots(snapshots);
+        throw error;
+    }
     return { previousKey, key: nextKey, title, previousRelativePath, relativePath: nextRelativePath, notePath: nextNotePath };
 }
 //# sourceMappingURL=promote-draft.js.map

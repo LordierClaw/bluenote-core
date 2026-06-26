@@ -166,6 +166,42 @@ test("promoteDraft restores noteId-keyed sidecar when removing the draft fails",
   }
 })
 
+test("promoteDraft restores draft artifacts when sync dirty tracking fails", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-sync-dirty-failure-"))
+  const noteId = "note_promote_dirty_failure"
+
+  try {
+    await enableSyncClientMode(rootPath)
+    await writeSidecarNote(rootPath, { noteId, key: "draft-abc123", title: "Draft ABC", relativePath: "draft/draft-abc123.md", type: "draft" })
+    await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
+    await mkdir(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true })
+
+    assert.throws(
+      () => promoteDraft({
+        override: rootPath,
+        selector: "draft-abc123",
+        destinationFolder: "note/work",
+        title: "Promoted Draft",
+        updatedAt: "2026-06-07T00:00:00.000Z",
+        randomSource: () => 0,
+      }),
+      /Could not record sync dirty state for local mutation/,
+    )
+
+    assert.equal(await readFile(path.join(rootPath, "draft", "draft-abc123.md"), "utf8"), "Draft ABC body\n")
+    await assert.rejects(readFile(path.join(rootPath, "note", "work", "promoted-draft-000000.md"), "utf8"))
+    const sidecar = JSON.parse(await readFile(path.join(rootPath, ".data", "notes", `${noteId}.json`), "utf8"))
+    assert.equal(sidecar.type, "draft")
+    assert.equal(sidecar.key, "draft-abc123")
+    assert.equal(sidecar.relativePath, "draft/draft-abc123.md")
+    await rm(path.join(rootPath, ".data", "sync", "sync.sqlite.lock"), { recursive: true, force: true })
+    assert.deepEqual(listDirtyRecords(rootPath), [])
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
+
 test("promoteDraft moves a draft into an existing note folder and preserves sidecar metadata", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-"))
   try {

@@ -391,6 +391,11 @@ function normalizeFolderRelativePath(rootPath, change) {
 function applyPulledFolderChange(rootPath, identity, change) {
     const relativePath = normalizeFolderRelativePath(rootPath, change);
     const deletedAt = change.changeType === "folder-delete" ? metadataString(change.metadata, "deletedAt") ?? change.changedAt : null;
+    if (deletedAt !== null && relativePath === "note") {
+        throw new UsageError("Cannot sync delete the managed note root folder.", {
+            hint: "Pulled folder deletes may target custom folders under note/, not the top-level note directory.",
+        });
+    }
     const folderPath = assertPathInsideRoot(rootPath, path.join(rootPath, relativePath));
     assertPathAndParentsAreNotSymlinks(rootPath, folderPath);
     if (deletedAt === null) {
