@@ -19,7 +19,7 @@ export interface RenameNoteHooks {
 export interface RenameNoteOptions extends ResolveBlueNoteRootOptions, NoteVisibilityOptions {
   selector: string
   title: string
-  body: string
+  body?: string
   updatedAt: string
   randomSource?: () => number
   hooks?: RenameNoteHooks
@@ -92,11 +92,12 @@ export function renameNote(options: RenameNoteOptions): RenameNoteSummary {
     mkdirSync(path.dirname(recoveryArtifactPath), { recursive: true })
     writeFileSync(recoveryArtifactPath, JSON.stringify(recoveryArtifact, null, 2) + "\n", "utf8")
     options.hooks?.onRecoveryArtifactStaged?.(recoveryArtifactPath)
+    const body = options.body ?? selected.body ?? readFileSync(path.join(rootPath, selected.sourcePath), "utf8")
 
     const renamed = repository.rename(path.join(rootPath, selected.sourcePath), {
       nextKey,
       title: options.title,
-      body: options.body,
+      body,
       updatedAt: options.updatedAt,
     })
 

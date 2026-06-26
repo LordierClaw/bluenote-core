@@ -6,7 +6,7 @@ export interface RenameNoteHooks {
 export interface RenameNoteOptions extends ResolveBlueNoteRootOptions, NoteVisibilityOptions {
     selector: string;
     title: string;
-    body: string;
+    body?: string;
     updatedAt: string;
     randomSource?: () => number;
     hooks?: RenameNoteHooks;

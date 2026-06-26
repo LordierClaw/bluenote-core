@@ -612,6 +612,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
       const previousRelativePath = toRootRelativePath(normalizedRootPath, normalizedNotePath)
       const existing = this.read(normalizedNotePath)
       const previousKey = existing.frontmatter.id
+      const nextBody = input.body ?? existing.body
       const nextRelativePath = joinPortableRelativePath(path.posix.dirname(previousRelativePath), `${input.nextKey}.md`)
       const nextNotePath = notePathFromRelativePath(normalizedRootPath, nextRelativePath)
       const existingSidecar = findSidecarForNote(normalizedRootPath, sidecars, previousKey, previousRelativePath)
@@ -622,7 +623,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
         ...existingSidecar,
         key: input.nextKey,
         title: input.title,
-        description: deriveDescription(input.body),
+        description: deriveDescription(nextBody),
         relativePath: nextRelativePath,
         updatedAt: input.updatedAt,
       }
@@ -648,7 +649,7 @@ export function createNoteRepository(rootPath: string): NoteRepository {
 
       try {
         fs.mkdirSync(path.dirname(nextNotePath), { recursive: true })
-        fs.writeFileSync(nextNotePath, createPlainNoteMarkdown(nextRelativePath, input.body), {
+        fs.writeFileSync(nextNotePath, createPlainNoteMarkdown(nextRelativePath, nextBody), {
           encoding: "utf8",
           flag: nextNotePath === normalizedNotePath ? "w" : "wx",
         })
