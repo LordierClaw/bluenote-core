@@ -5,7 +5,7 @@ import { resolveBlueNoteRoot, type ResolveBlueNoteRootOptions } from "../config/
 import { UsageError } from "../core/errors"
 import { ensureManagedRoot, getNormalNotesPath } from "../storage/root-layout"
 import { createNoteRepository } from "../storage/note-repository"
-import { readStateManifest } from "../storage/state-manifest"
+import { readStateManifest, writeStateManifest } from "../storage/state-manifest"
 import { createDirtyRecordRepository } from "./dirty-repository"
 import { createFolderRepository } from "./folder-repository"
 import { createSyncClientService } from "./client-service"
@@ -145,7 +145,8 @@ export function linkCoreSync(options: SyncLinkOptions & ResolveBlueNoteRootOptio
   assertValidServerUrl(serverUrl)
 
   const rootPath = resolveManagedRoot(rootOptions)
-  const workspaceId = requestedWorkspaceId ?? readStateManifest(rootPath).workspaceId
+  const manifest = readStateManifest(rootPath)
+  const workspaceId = requestedWorkspaceId ?? manifest.workspaceId
   if (!workspaceId) {
     throw new UsageError("Cannot link sync without a workspace ID.", {
       hint: "Initialize or repair the BlueNote root before linking sync.",
@@ -187,6 +188,10 @@ export function linkCoreSync(options: SyncLinkOptions & ResolveBlueNoteRootOptio
     updatedAt: markedAt,
     lastError: null,
   })
+
+  if (requestedWorkspaceId !== undefined && requestedWorkspaceId !== manifest.workspaceId) {
+    writeStateManifest(rootPath, { ...manifest, workspaceId: requestedWorkspaceId })
+  }
 
   setSyncRuntimeMode(rootPath, { mode: "sync-client", workspaceId })
 

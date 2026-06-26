@@ -1,5 +1,5 @@
 import path from "node:path"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, rmSync } from "node:fs"
 
 import { resolveBlueNoteRoot, type ResolveBlueNoteRootOptions } from "../config/root"
 import { enqueueDescribeNoteIfAiEnabled } from "../ai/enqueue-describe-note"
@@ -85,6 +85,11 @@ function shouldEnqueueLocalAiDescription(rootPath: string): boolean {
 }
 
 
+function rollbackCreatedNoteArtifacts(rootPath: string, created: { notePath: string }, noteId: string): void {
+  rmSync(created.notePath, { force: true })
+  rmSync(createSidecarRepository(rootPath).getSidecarPathByNoteId(noteId), { force: true })
+}
+
 export function createNote(options: CreateNoteOptions): CreateNoteSummary {
   const rootPath = ensureManagedRoot(resolveBlueNoteRoot(options))
   const clock = options.clock ?? systemClock
@@ -155,14 +160,19 @@ export function createNote(options: CreateNoteOptions): CreateNoteSummary {
     destination,
   })
 
-  recordSyncMutationBestEffort(rootPath, {
-    notes: [{
-      entityId: noteId,
-      markedAt: timestamp,
-      metadata: { key, relativePath: created.relativePath, title },
-    }],
-    folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
-  })
+  try {
+    recordSyncMutationBestEffort(rootPath, {
+      notes: [{
+        entityId: noteId,
+        markedAt: timestamp,
+        metadata: { key, relativePath: created.relativePath, title },
+      }],
+      folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
+    })
+  } catch (error) {
+    rollbackCreatedNoteArtifacts(rootPath, created, noteId)
+    throw error
+  }
 
   const rebuildSummary = rebuildIndexes({ override: rootPath })
 

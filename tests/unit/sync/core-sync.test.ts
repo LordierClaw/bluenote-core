@@ -106,6 +106,26 @@ describe("createBlueNoteCore sync namespace", () => {
     })
   })
 
+  test("link with explicit workspaceId persists that workspace in the manifest", async () => {
+    await withTempRoot("bluenote-core-sync-link-explicit-workspace-", async (rootPath) => {
+      const core = createBlueNoteCore({ rootPath })
+      core.init()
+      const originalWorkspaceId = readStateManifest(rootPath).workspaceId
+
+      const summary = core.sync.link({
+        mode: "seed-empty-server-from-local",
+        serverUrl: "https://sync.example.test",
+        workspaceId: "workspace-server-existing",
+      })
+
+      assert.notEqual(originalWorkspaceId, "workspace-server-existing")
+      assert.equal(summary.workspaceId, "workspace-server-existing")
+      assert.equal(readStateManifest(rootPath).workspaceId, "workspace-server-existing")
+      assert.deepEqual(readSyncRuntimeMode(rootPath), { mode: "sync-client", workspaceId: "workspace-server-existing" })
+    })
+  })
+
+
   test("link persists a stable noteId before seeding legacy sidecars", async () => {
     await withTempRoot("bluenote-core-sync-link-legacy-noteid-", async (rootPath) => {
       const core = createBlueNoteCore({ rootPath })

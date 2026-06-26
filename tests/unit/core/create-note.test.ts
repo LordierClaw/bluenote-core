@@ -238,7 +238,8 @@ test("createNote fails when sync dirty bookkeeping is temporarily unavailable", 
       }),
       /Could not record sync dirty state for local mutation/,
     )
-    assert.equal(await readFile(path.join(rootPath, "draft", "retry-later-000zzz.md"), "utf8"), "Local write must not be reported as synced.\n")
+    assert.equal(existsSync(path.join(rootPath, "draft", "retry-later-000zzz.md")), false)
+    assert.equal(existsSync(path.join(getStateNotesPath(rootPath), "note_dirty_retry_later.json")), false)
   })
 })
 

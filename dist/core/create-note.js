@@ -1,5 +1,5 @@
 import path from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { resolveBlueNoteRoot } from "../config/root.js";
 import { enqueueDescribeNoteIfAiEnabled } from "../ai/enqueue-describe-note.js";
 import { IndexValidationFailedError, UsageError } from "./errors.js";
@@ -51,6 +51,10 @@ function shouldEnqueueLocalAiDescription(rootPath) {
     catch {
         return true;
     }
+}
+function rollbackCreatedNoteArtifacts(rootPath, created, noteId) {
+    rmSync(created.notePath, { force: true });
+    rmSync(createSidecarRepository(rootPath).getSidecarPathByNoteId(noteId), { force: true });
 }
 export function createNote(options) {
     const rootPath = ensureManagedRoot(resolveBlueNoteRoot(options));
@@ -118,14 +122,20 @@ export function createNote(options) {
         body: options.body ?? "",
         destination,
     });
-    recordSyncMutationBestEffort(rootPath, {
-        notes: [{
-                entityId: noteId,
-                markedAt: timestamp,
-                metadata: { key, relativePath: created.relativePath, title },
-            }],
-        folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
-    });
+    try {
+        recordSyncMutationBestEffort(rootPath, {
+            notes: [{
+                    entityId: noteId,
+                    markedAt: timestamp,
+                    metadata: { key, relativePath: created.relativePath, title },
+                }],
+            folders: destination.type === "normal" ? [{ relativePath: destination.folderRelativePath, markedAt: timestamp }] : undefined,
+        });
+    }
+    catch (error) {
+        rollbackCreatedNoteArtifacts(rootPath, created, noteId);
+        throw error;
+    }
     const rebuildSummary = rebuildIndexes({ override: rootPath });
     if (rebuildSummary.validationErrors.length > 0) {
         throw new IndexValidationFailedError([`Created note '${key}', but derived indexes could not be rebuilt.`, ...rebuildSummary.validationErrors].join("\n"), {
