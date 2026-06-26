@@ -1,0 +1,1 @@
+{"version":3,"file":"file-snapshot.d.ts","sourceRoot":"","sources":["../../src/core/file-snapshot.ts"],"names":[],"mappings":"AAGA,MAAM,WAAW,YAAY;IAC3B,QAAQ,EAAE,MAAM,CAAA;IAChB,OAAO,EAAE,MAAM,GAAG,IAAI,CAAA;CACvB;AAED,wBAAgB,aAAa,CAAC,SAAS,EAAE,MAAM,EAAE,GAAG,YAAY,EAAE,CAKjE;AAED,wBAAgB,oBAAoB,CAAC,SAAS,EAAE,YAAY,EAAE,GAAG,IAAI,CAUpE"}
