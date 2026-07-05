@@ -25,6 +25,7 @@ export interface DirtyNoteInput {
 export interface DirtyFolderInput {
   relativePath: string
   markedAt: string
+  dirtyType?: "upsert" | "delete"
 }
 
 export interface TombstoneInput {
@@ -163,15 +164,17 @@ export function recordSyncMutationBestEffort(rootPath: string, input: SyncMutati
 
     for (const folder of input.folders ?? []) {
       const relativePath = normalizeFolderRelativePath(folder.relativePath)
+      const deletedAt = folder.dirtyType === "delete" ? folder.markedAt : null
       folderRepository.upsertFolder({
         relativePath,
         createdAt: folder.markedAt,
         updatedAt: folder.markedAt,
+        deletedAt,
       })
       dirtyRepository.markDirty({
         entityType: "folder",
         entityId: relativePath,
-        dirtyType: "upsert",
+        dirtyType: folder.dirtyType ?? "upsert",
         markedAt: folder.markedAt,
         metadata: { relativePath },
       })

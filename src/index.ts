@@ -88,6 +88,12 @@ export * from "./sync/protocol"
 export * from "./sync/client-service"
 export * from "./sync/server-service"
 export * from "./sync/http-transport"
+export {
+  ensureNoteSyncEntityIdForSyncSeed,
+  getNoteSyncEntityId,
+  recordSyncMutationBestEffort,
+} from "./sync/mutation-tracking"
+export type { DirtyFolderInput, DirtyNoteInput, SyncMutationInput } from "./sync/mutation-tracking"
 export * from "./sync/sync-log"
 export * from "./sync/dirty-repository"
 export * from "./sync/folder-repository"

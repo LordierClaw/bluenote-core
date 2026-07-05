@@ -9,6 +9,7 @@ export interface DirtyNoteInput {
 export interface DirtyFolderInput {
     relativePath: string;
     markedAt: string;
+    dirtyType?: "upsert" | "delete";
 }
 export interface TombstoneInput {
     entityId: string;

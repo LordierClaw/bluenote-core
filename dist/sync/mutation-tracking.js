@@ -118,15 +118,17 @@ export function recordSyncMutationBestEffort(rootPath, input) {
         const tombstoneRepository = createTombstoneRepository(rootPath, identity);
         for (const folder of input.folders ?? []) {
             const relativePath = normalizeFolderRelativePath(folder.relativePath);
+            const deletedAt = folder.dirtyType === "delete" ? folder.markedAt : null;
             folderRepository.upsertFolder({
                 relativePath,
                 createdAt: folder.markedAt,
                 updatedAt: folder.markedAt,
+                deletedAt,
             });
             dirtyRepository.markDirty({
                 entityType: "folder",
                 entityId: relativePath,
-                dirtyType: "upsert",
+                dirtyType: folder.dirtyType ?? "upsert",
                 markedAt: folder.markedAt,
                 metadata: { relativePath },
             });

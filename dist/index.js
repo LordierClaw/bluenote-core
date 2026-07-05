@@ -69,6 +69,7 @@ export * from "./sync/protocol.js";
 export * from "./sync/client-service.js";
 export * from "./sync/server-service.js";
 export * from "./sync/http-transport.js";
+export { ensureNoteSyncEntityIdForSyncSeed, getNoteSyncEntityId, recordSyncMutationBestEffort, } from "./sync/mutation-tracking.js";
 export * from "./sync/sync-log.js";
 export * from "./sync/dirty-repository.js";
 export * from "./sync/folder-repository.js";

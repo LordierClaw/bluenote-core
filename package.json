@@ -1,6 +1,6 @@
 {
   "name": "@lordierclaw/bluenote-core",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Headless BlueNote core for local-first Markdown notes.",
   "license": "Apache-2.0",
   "repository": {
