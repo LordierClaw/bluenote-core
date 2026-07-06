@@ -246,6 +246,36 @@ test("promoteDraft keeps local promotion when sync dirty tracking fails", async 
 })
 
 
+test("promoteDraft upgrades legacy sidecars to stable noteIds before marking sync dirty", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-legacy-sync-id-"))
+
+  try {
+    await enableSyncClientMode(rootPath)
+    await writeSidecarNote(rootPath, { key: "draft-abc123", title: "Draft ABC", relativePath: "draft/draft-abc123.md", type: "draft" })
+    await mkdir(path.join(rootPath, "note", "work"), { recursive: true })
+
+    const promoted = promoteDraft({
+      override: rootPath,
+      selector: "draft-abc123",
+      destinationFolder: "note/work",
+      title: "Promoted Draft",
+      updatedAt: "2026-06-07T00:00:00.000Z",
+      randomSource: () => 0,
+    })
+
+    const sidecar = createSidecarRepository(rootPath).read(promoted.key)
+    assert.ok(sidecar.noteId)
+    assert.equal(sidecar.key, "promoted-draft-000000")
+    assert.equal(sidecar.relativePath, "note/work/promoted-draft-000000.md")
+    const dirtyRecord = listDirtyRecords(rootPath).find((record) => record.entityType === "note")
+    assert.equal(dirtyRecord?.entityId, sidecar.noteId)
+    assert.equal(dirtyRecord?.metadata?.previousKey, "draft-abc123")
+    assert.equal(dirtyRecord?.metadata?.key, "promoted-draft-000000")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("promoteDraft moves a draft into an existing note folder and preserves sidecar metadata", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-promote-draft-"))
   try {

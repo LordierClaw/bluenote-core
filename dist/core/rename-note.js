@@ -5,7 +5,8 @@ import { createNoteKey } from "../domain/note-key.js";
 import { createNoteRepository } from "../storage/note-repository.js";
 import { selectNote } from "./select-note.js";
 import { joinPortableRelativePath } from "../platform/path-safety.js";
-import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
+import { ensureNoteSyncEntityIdForSyncSeed, getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
+import { getSyncClientRuntimeMode } from "../sync/runtime-mode.js";
 import { UsageError } from "./errors.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
 import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot.js";
@@ -31,7 +32,9 @@ export function renameNote(options) {
     const repository = createNoteRepository(rootPath);
     const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility });
     const currentKey = selected.frontmatter.id;
-    const syncEntityId = getNoteSyncEntityId(rootPath, selected);
+    const syncEntityId = getSyncClientRuntimeMode(rootPath) === null
+        ? getNoteSyncEntityId(rootPath, selected)
+        : ensureNoteSyncEntityIdForSyncSeed(rootPath, selected);
     let nextKey;
     try {
         nextKey = createNoteKey(options.title, {

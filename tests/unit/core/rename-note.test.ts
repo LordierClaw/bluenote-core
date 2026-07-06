@@ -156,6 +156,40 @@ test("renameNote preserves existing body when body is omitted for schema 3 sidec
   }
 })
 
+test("renameNote upgrades legacy sidecars to stable noteIds before marking sync dirty", async () => {
+  const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-rename-note-legacy-sync-id-"))
+
+  try {
+    await enableSyncClientMode(rootPath)
+    await writePlainNoteWithSidecar(rootPath, {
+      key: "original-note",
+      title: "Original Title",
+      description: "Original description.",
+      relativePath: "note/work/original-note.md",
+      body: "Original body.\n",
+    })
+
+    const summary = renameNote({
+      override: rootPath,
+      selector: "original-note",
+      title: "Renamed Title",
+      updatedAt: "2026-05-21T12:45:00.000Z",
+      randomSource: () => 10,
+    })
+
+    const sidecar = createSidecarRepository(rootPath).read(summary.key)
+    assert.ok(sidecar.noteId)
+    assert.equal(sidecar.key, "renamed-title-00000a")
+    assert.equal(sidecar.relativePath, "note/work/renamed-title-00000a.md")
+    const dirtyRecord = listDirtyRecords(rootPath).find((record) => record.entityType === "note")
+    assert.equal(dirtyRecord?.entityId, sidecar.noteId)
+    assert.equal(dirtyRecord?.metadata?.previousKey, "original-note")
+    assert.equal(dirtyRecord?.metadata?.key, "renamed-title-00000a")
+  } finally {
+    await rm(rootPath, { recursive: true, force: true })
+  }
+})
+
 test("renameNote renames the key, file, and sidecar and reports the previous and new key", async () => {
   const rootPath = await mkdtemp(path.join(os.tmpdir(), "bluenote-rename-note-"))
   const relativePath = "note/work/original-note.md"

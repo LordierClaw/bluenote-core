@@ -6,7 +6,8 @@ import { createNoteKey } from "../domain/note-key"
 import { createNoteRepository } from "../storage/note-repository"
 import { selectNote } from "./select-note"
 import { joinPortableRelativePath } from "../platform/path-safety"
-import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
+import { ensureNoteSyncEntityIdForSyncSeed, getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking"
+import { getSyncClientRuntimeMode } from "../sync/runtime-mode"
 import { UsageError } from "./errors"
 import type { NoteVisibilityOptions } from "./note-visibility"
 import { createSidecarRepository } from "../storage/sidecar-repository"
@@ -56,7 +57,9 @@ export function renameNote(options: RenameNoteOptions): RenameNoteSummary {
   const repository = createNoteRepository(rootPath)
   const selected = selectNote({ repository, selector: options.selector, visibility: options.visibility })
   const currentKey = selected.frontmatter.id
-  const syncEntityId = getNoteSyncEntityId(rootPath, selected)
+  const syncEntityId = getSyncClientRuntimeMode(rootPath) === null
+    ? getNoteSyncEntityId(rootPath, selected)
+    : ensureNoteSyncEntityIdForSyncSeed(rootPath, selected)
 
   let nextKey: string
 

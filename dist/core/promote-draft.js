@@ -7,7 +7,8 @@ import { createNoteRepository } from "../storage/note-repository.js";
 import { parsePlainNote, serializePlainNote } from "../storage/plain-note.js";
 import { getNormalNotesPath } from "../storage/root-layout.js";
 import { createSidecarRepository } from "../storage/sidecar-repository.js";
-import { getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
+import { ensureNoteSyncEntityIdForSyncSeed, getNoteSyncEntityId, recordSyncMutationBestEffort } from "../sync/mutation-tracking.js";
+import { getSyncClientRuntimeMode } from "../sync/runtime-mode.js";
 import { selectNote } from "./select-note.js";
 import { UsageError } from "./errors.js";
 import { restoreFileSnapshots, snapshotFiles } from "./file-snapshot.js";
@@ -109,7 +110,9 @@ export function promoteDraft(options) {
     const sidecars = createSidecarRepository(rootPath);
     const selected = selectNote({ repository, selector: options.selector, visibility: "drafts" });
     const previousKey = selected.frontmatter.id;
-    const syncEntityId = getNoteSyncEntityId(rootPath, selected);
+    const syncEntityId = getSyncClientRuntimeMode(rootPath) === null
+        ? getNoteSyncEntityId(rootPath, selected)
+        : ensureNoteSyncEntityIdForSyncSeed(rootPath, selected);
     const previousRelativePath = selected.sourcePath;
     const previousNotePath = assertPathInsideRoot(rootPath, path.join(rootPath, previousRelativePath));
     const existingSidecar = findSidecarForNote(rootPath, sidecars, previousKey, previousRelativePath);
