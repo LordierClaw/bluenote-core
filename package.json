@@ -48,12 +48,12 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "@types/node": "16.18.126",
+    "@types/node": "26.1.0",
     "@types/node-fetch": "2.6.13",
-    "js-yaml": "4.1.1",
-    "minisearch": "6.3.0",
-    "node-fetch": "2.7.0",
-    "sql.js": "1.10.3"
+    "js-yaml": "5.2.1",
+    "minisearch": "7.2.0",
+    "node-fetch": "3.3.2",
+    "sql.js": "1.14.1"
   },
   "devDependencies": {
     "tsx": "3.14.0",
